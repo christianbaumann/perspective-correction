@@ -42,7 +42,7 @@ const { width, height } = rect;
     const ctx = canvas.getContext('2d', { alpha: false });
 
     const srcImg = sourceCtx.getImageData(
-        0, 0, pointsCanvas.width, pointsCanvas.height
+        0, 0, sourceCtx.canvas.width, sourceCtx.canvas.height
     );
     const dstImg = ctx.createImageData(canvas.width, canvas.height);
 
@@ -99,7 +99,7 @@ const { width, height } = rect;
     applySharpen(ctx, canvas.width, canvas.height);
 
     // Display result
-    sourceCtx.clearRect(0, 0, pointsCanvas.width, pointsCanvas.height);
+    sourceCtx.clearRect(0, 0, sourceCtx.canvas.width, sourceCtx.canvas.height);
     sourceCtx.drawImage(canvas, 0, 0);
 
     pointsCanvas.style.pointerEvents = 'none';

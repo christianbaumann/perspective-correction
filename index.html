@@ -206,6 +206,15 @@
           <canvas id="sourceCanvas"></canvas>
           <canvas id="gridCanvas"></canvas>
           <canvas id="pointsCanvas"></canvas>
+          <canvas id="zoomCanvas"></canvas>
+          <canvas id="cornerZoomTL" class="corner-zoom" data-corner="tl"></canvas>
+          <canvas id="cornerZoomTR" class="corner-zoom" data-corner="tr"></canvas>
+          <canvas id="cornerZoomBL" class="corner-zoom" data-corner="bl"></canvas>
+          <canvas id="cornerZoomBR" class="corner-zoom" data-corner="br"></canvas>
+          <div id="loadingOverlay" class="loading-overlay" style="display:none">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading image...</div>
+          </div>
         </div>
       </section>
 
@@ -245,24 +254,21 @@
 
       gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
 
-      // Calculate average brightness
-      const sourceCtx = sourceCanvas.getContext('2d');
-      const imageData = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
-      const data = imageData.data;
+      // Calculate average brightness using a tiny downscaled sample
+      const sampleSize = 16;
+      const sampleCanvas = document.createElement('canvas');
+      sampleCanvas.width = sampleSize;
+      sampleCanvas.height = sampleSize;
+      const sampleCtx = sampleCanvas.getContext('2d');
+      sampleCtx.drawImage(sourceCanvas, 0, 0, sampleSize, sampleSize);
+      const sampleData = sampleCtx.getImageData(0, 0, sampleSize, sampleSize).data;
+
       let totalBrightness = 0;
-      let sampleCount = 0;
-      
-      // Sample every 100th pixel for performance
-      for (let i = 0; i < data.length; i += 400) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const brightness = (0.299 * r + 0.587 * g + 0.114 * b);
-        totalBrightness += brightness;
-        sampleCount++;
+      const pixelCount = sampleSize * sampleSize;
+      for (let i = 0; i < sampleData.length; i += 4) {
+          totalBrightness += 0.299 * sampleData[i] + 0.587 * sampleData[i + 1] + 0.114 * sampleData[i + 2];
       }
-      
-      const avgBrightness = totalBrightness / sampleCount;
+      const avgBrightness = totalBrightness / pixelCount;
       
       // Use white grid for dark images, black grid for light images
       const gridColor = avgBrightness < 128 ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)';
@@ -312,17 +318,12 @@
         if (items[i].type.indexOf('image') !== -1) {
           e.preventDefault();
           const blob = items[i].getAsFile();
-          const reader = new FileReader();
-          reader.onload = function(event) {
-            const imageInput = document.getElementById('imageInput');
-            const file = new File([blob], 'pasted-image.png', { type: blob.type });
-            const dataTransfer = new DataTransfer();
-            dataTransfer.items.add(file);
-            imageInput.files = dataTransfer.files;
-            const changeEvent = new Event('change', { bubbles: true });
-            imageInput.dispatchEvent(changeEvent);
-          };
-          reader.readAsDataURL(blob);
+          const file = new File([blob], 'pasted-image.png', { type: blob.type });
+          const dataTransfer = new DataTransfer();
+          dataTransfer.items.add(file);
+          const imageInput = document.getElementById('imageInput');
+          imageInput.files = dataTransfer.files;
+          imageInput.dispatchEvent(new Event('change', { bubbles: true }));
           break;
         }
       }

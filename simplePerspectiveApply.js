@@ -2,7 +2,7 @@ import { PerspectiveTransform } from './perspectiveTransform.js';
 
 export function applySimplePerspective(orderedPoints, { sourceCtx, pointsCanvas, downloadBtn, statusMessage }) {
     // Calculate bounding box
-    let minX = pointsCanvas.width, maxX = 0, minY = pointsCanvas.height, maxY = 0;
+    let minX = sourceCtx.canvas.width, maxX = 0, minY = sourceCtx.canvas.height, maxY = 0;
     for (const point of orderedPoints) {
         minX = Math.min(minX, point.x);
         maxX = Math.max(maxX, point.x);
@@ -36,7 +36,7 @@ export function applySimplePerspective(orderedPoints, { sourceCtx, pointsCanvas,
     tempCanvas.height = destHeight;
     const tempCtx = tempCanvas.getContext('2d');
 
-    const imageData = sourceCtx.getImageData(0, 0, pointsCanvas.width, pointsCanvas.height);
+    const imageData = sourceCtx.getImageData(0, 0, sourceCtx.canvas.width, sourceCtx.canvas.height);
     const destImageData = tempCtx.createImageData(destWidth, destHeight);
 
     for (let y = 0; y < destHeight; y++) {
@@ -47,8 +47,8 @@ export function applySimplePerspective(orderedPoints, { sourceCtx, pointsCanvas,
 
             const destIndex = (y * destWidth + x) * 4;
 
-            if (srcX >= 0 && srcX < pointsCanvas.width && srcY >= 0 && srcY < pointsCanvas.height) {
-                const srcIndex = (srcY * pointsCanvas.width + srcX) * 4;
+            if (srcX >= 0 && srcX < sourceCtx.canvas.width && srcY >= 0 && srcY < sourceCtx.canvas.height) {
+                const srcIndex = (srcY * sourceCtx.canvas.width + srcX) * 4;
                 destImageData.data[destIndex] = imageData.data[srcIndex];
                 destImageData.data[destIndex + 1] = imageData.data[srcIndex + 1];
                 destImageData.data[destIndex + 2] = imageData.data[srcIndex + 2];
@@ -73,12 +73,8 @@ export function applySimplePerspective(orderedPoints, { sourceCtx, pointsCanvas,
         orderedPoints: orderedPoints
     };
 
-    sourceCtx.clearRect(0, 0, pointsCanvas.width, pointsCanvas.height);
+    sourceCtx.clearRect(0, 0, sourceCtx.canvas.width, sourceCtx.canvas.height);
     sourceCtx.drawImage(tempCanvas, minX, minY, destWidth, destHeight);
-
-    sourceCtx.strokeStyle = '#40c057';
-    sourceCtx.lineWidth = 3;
-    sourceCtx.strokeRect(minX, minY, destWidth, destHeight);
 
     pointsCanvas.style.pointerEvents = 'none';
     downloadBtn.disabled = false;

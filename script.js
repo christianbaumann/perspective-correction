@@ -21,6 +21,7 @@ const downloadBtn = document.getElementById('downloadBtn');
 const resetBtn = document.getElementById('resetBtn');
 const statusMessage = document.getElementById('statusMessage');
 const printBtn = document.getElementById('printBtn');
+const loadingOverlay = document.getElementById('loadingOverlay');
 
 // Folder browser DOM elements
 const folderBrowserGroup = document.getElementById('folderBrowserGroup');
@@ -41,6 +42,21 @@ const ZOOM_CANVAS_SIZE = 200;
 zoomCanvas.width = ZOOM_CANVAS_SIZE;
 zoomCanvas.height = ZOOM_CANVAS_SIZE;
 
+// Corner zoom previews
+const CORNER_ZOOM_SIZE = 150;
+const cornerZoomCanvases = {
+    tl: document.getElementById('cornerZoomTL'),
+    tr: document.getElementById('cornerZoomTR'),
+    bl: document.getElementById('cornerZoomBL'),
+    br: document.getElementById('cornerZoomBR'),
+};
+const cornerZoomCtxs = {};
+for (const [key, canvas] of Object.entries(cornerZoomCanvases)) {
+    canvas.width = CORNER_ZOOM_SIZE;
+    canvas.height = CORNER_ZOOM_SIZE;
+    cornerZoomCtxs[key] = canvas.getContext('2d');
+}
+
 // State variables
 let image = null;
 let points = [];
@@ -50,6 +66,8 @@ let isDragging = false;
 let transformedImageData = null;
 let originalImageData = null;
 let displayScale = 1; // Scale factor between display and actual image
+let cornerDragState = null; // { cornerKey, pointRef, pointIndex }
+let currentCornerAssignment = { tl: null, tr: null, bl: null, br: null };
 
 // Folder browser state
 let folderHandle = null;
@@ -58,6 +76,19 @@ let currentFolderImageIndex = -1;
 
 // Point persistence state
 let savedNormalizedPoints = null; // Normalized points (0-1) for reuse across folder images
+
+function releaseImageMemory() {
+    originalImageData = null;
+    transformedImageData = null;
+    // Zero canvas backing stores to release GPU memory before resize
+    sourceCanvas.width = 0;
+    sourceCanvas.height = 0;
+    pointsCanvas.width = 0;
+    pointsCanvas.height = 0;
+}
+
+function showLoading() { if (loadingOverlay) loadingOverlay.style.display = ''; }
+function hideLoading() { if (loadingOverlay) loadingOverlay.style.display = 'none'; }
 
 const canvasWrapper = document.querySelector('.canvas-wrapper');
 
@@ -91,7 +122,23 @@ function init() {
         handleCanvasMouseUp();
         hideZoomPreview();
     });
-    
+
+    // Corner zoom drag events
+    for (const [key, canvas] of Object.entries(cornerZoomCanvases)) {
+        canvas.addEventListener('mousedown', (e) => handleCornerZoomMouseDown(e, key));
+        canvas.addEventListener('mousemove', (e) => handleCornerZoomMouseMove(e));
+        canvas.addEventListener('mouseup', handleCornerZoomMouseUp);
+        canvas.addEventListener('mouseleave', handleCornerZoomMouseUp);
+    }
+
+    // Enter key triggers "Apply correction"
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.target.matches('input, textarea, select, button')) {
+            e.preventDefault();
+            applyPerspectiveCorrection();
+        }
+    });
+
     setMode('add');
 
     // Initialize grid
@@ -128,14 +175,18 @@ function loadSampleImage() {
         </svg>
     `;
 
+    showLoading();
     const sampleImage = new Image();
     sampleImage.onload = function() {
+        releaseImageMemory();
         image = sampleImage;
         setupCanvas();
+        hideLoading();
         statusMessage.textContent = "Sample image loaded. Select 4+ points to define perspective correction area.";
         statusMessage.className = "status success";
     };
     sampleImage.onerror = function() {
+        hideLoading();
         statusMessage.textContent = "Failed to load sample image. Please upload your own image.";
         statusMessage.className = "status error";
     };
@@ -147,20 +198,27 @@ function loadSampleImage() {
 function handleImageUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const img = new Image();
-        img.onload = function() {
-            image = img;
-            setupCanvas();
-            resetAllPoints();
-            statusMessage.textContent = `Image loaded (${img.naturalWidth}×${img.naturalHeight}px). Original resolution preserved. Select 4+ points.`;
-            statusMessage.className = "status success";
-        };
-        img.src = e.target.result;
+
+    showLoading();
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = function() {
+        releaseImageMemory();
+        image = img;
+        setupCanvas();
+        resetAllPoints();
+        URL.revokeObjectURL(url);
+        hideLoading();
+        statusMessage.textContent = `Image loaded (${img.naturalWidth}×${img.naturalHeight}px). Original resolution preserved. Select 4+ points.`;
+        statusMessage.className = "status success";
     };
-    reader.readAsDataURL(file);
+    img.onerror = function() {
+        URL.revokeObjectURL(url);
+        hideLoading();
+        statusMessage.textContent = "Failed to load image.";
+        statusMessage.className = "status error";
+    };
+    img.src = url;
 }
 
 // Set up canvas dimensions - PRESERVE ORIGINAL RESOLUTION
@@ -190,20 +248,20 @@ function setupCanvas() {
     // Set canvas to ORIGINAL image resolution (not display size)
     sourceCanvas.width = imageWidth;
     sourceCanvas.height = imageHeight;
-    pointsCanvas.width = imageWidth;
-    pointsCanvas.height = imageHeight;
-    
+
+    // pointsCanvas at display resolution (only draws crosshairs/lines)
+    pointsCanvas.width = Math.round(displayWidth);
+    pointsCanvas.height = Math.round(displayHeight);
+
     // Calculate scale factor between display and actual canvas
     displayScale = imageWidth / displayWidth;
-    
+
     // Store displayScale globally for grid function
     window.currentDisplayScale = displayScale;
-    
+
     // Set CSS display size (visual size in browser)
     sourceCanvas.style.width = displayWidth + 'px';
     sourceCanvas.style.height = displayHeight + 'px';
-    pointsCanvas.style.width = displayWidth + 'px';
-    pointsCanvas.style.height = displayHeight + 'px';
     
     // Center canvases in container
     const offsetX = (containerWidth - displayWidth) / 2;
@@ -228,6 +286,10 @@ function setupCanvas() {
         window.drawGrid(sourceCanvas, displayScale);
     }
     
+    // Position corner zoom boxes
+    positionCornerZooms(offsetX, offsetY, displayWidth, displayHeight);
+    updateAllCornerZooms();
+
     console.log(`Canvas Resolution: ${imageWidth}×${imageHeight}, Display: ${displayWidth.toFixed(0)}×${displayHeight.toFixed(0)}, Scale: ${displayScale.toFixed(2)}x`);
 }
 
@@ -251,6 +313,11 @@ function setMode(newMode) {
     }
     
     statusMessage.className = "status";
+
+    // Corner zoom boxes are always interactive for dragging points
+    for (const canvas of Object.values(cornerZoomCanvases)) {
+        canvas.style.pointerEvents = 'auto';
+    }
 }
 
 // Get canvas coordinates from mouse event - ACCOUNTING FOR SCALE
@@ -336,6 +403,59 @@ function handleCanvasMouseMove(event) {
 
 // Handle mouse up on canvas
 function handleCanvasMouseUp() {
+    isDragging = false;
+}
+
+// Corner zoom drag handlers
+function handleCornerZoomMouseDown(event, cornerKey) {
+    if (!image) return;
+    const entry = currentCornerAssignment[cornerKey];
+    if (!entry) return;
+
+    event.preventDefault();
+    cornerDragState = {
+        cornerKey,
+        pointRef: entry.point,
+        pointIndex: entry.index,
+        initPointX: entry.point.x,
+        initPointY: entry.point.y,
+        initMouseX: event.clientX,
+        initMouseY: event.clientY,
+    };
+    selectedPointIndex = entry.index;
+    isDragging = true;
+    event.target.style.cursor = 'grabbing';
+    drawPoints();
+}
+
+function handleCornerZoomMouseMove(event) {
+    if (!cornerDragState) return;
+
+    // Use absolute mouse delta from drag start to avoid feedback loop
+    // (the zoom re-centers on the point each frame, so zoom-relative coords drift)
+    // The zoom box CSS size maps to regionSize canvas pixels.
+    // 1 mouse pixel in zoom box = regionSize / cssSize canvas pixels.
+    const canvas = cornerZoomCanvases[cornerDragState.cornerKey];
+    const rect = canvas.getBoundingClientRect();
+    const cssSize = rect.width; // actual CSS pixel size of the zoom box
+    const regionSize = CORNER_ZOOM_SIZE * displayScale / ZOOM_FACTOR;
+    const scale = regionSize / cssSize;
+    const canvasX = cornerDragState.initPointX + (event.clientX - cornerDragState.initMouseX) * scale;
+    const canvasY = cornerDragState.initPointY + (event.clientY - cornerDragState.initMouseY) * scale;
+
+    // Clamp to canvas bounds
+    cornerDragState.pointRef.x = Math.max(0, Math.min(sourceCanvas.width, canvasX));
+    cornerDragState.pointRef.y = Math.max(0, Math.min(sourceCanvas.height, canvasY));
+
+    drawPoints();
+}
+
+function handleCornerZoomMouseUp() {
+    if (cornerDragState) {
+        const canvas = cornerZoomCanvases[cornerDragState.cornerKey];
+        canvas.style.cursor = 'grab';
+        cornerDragState = null;
+    }
     isDragging = false;
 }
 
@@ -439,62 +559,213 @@ function hideZoomPreview() {
     zoomCanvas.style.display = 'none';
 }
 
+// Corner zoom box positioning
+function positionCornerZooms(offsetX, offsetY, displayWidth, displayHeight) {
+    if (offsetX < CORNER_ZOOM_SIZE + 16) {
+        for (const canvas of Object.values(cornerZoomCanvases)) {
+            canvas.style.display = 'none';
+        }
+        return;
+    }
+
+    const margin = 8;
+    const cSize = CORNER_ZOOM_SIZE;
+
+    const leftX = Math.max(margin, (offsetX - cSize) / 2);
+    const rightX = offsetX + displayWidth + Math.max(margin, (offsetX - cSize) / 2);
+
+    const topY = offsetY + margin;
+    const bottomY = offsetY + displayHeight - cSize - margin;
+
+    const positions = {
+        tl: { left: leftX, top: topY },
+        tr: { left: rightX, top: topY },
+        bl: { left: leftX, top: bottomY },
+        br: { left: rightX, top: bottomY },
+    };
+
+    for (const [key, canvas] of Object.entries(cornerZoomCanvases)) {
+        const pos = positions[key];
+        canvas.style.left = pos.left + 'px';
+        canvas.style.top = pos.top + 'px';
+        canvas.style.display = 'block';
+    }
+}
+
+// Assign points to corners based on spatial proximity
+function assignPointsToCorners() {
+    const w = sourceCanvas.width;
+    const h = sourceCanvas.height;
+    const corners = {
+        tl: { x: 0, y: 0 },
+        tr: { x: w, y: 0 },
+        bl: { x: 0, y: h },
+        br: { x: w, y: h },
+    };
+
+    const assignment = { tl: null, tr: null, bl: null, br: null };
+    const used = new Set();
+
+    const pairs = [];
+    for (const [key, corner] of Object.entries(corners)) {
+        for (let i = 0; i < points.length; i++) {
+            const dx = points[i].x - corner.x;
+            const dy = points[i].y - corner.y;
+            pairs.push({ key, index: i, dist: dx * dx + dy * dy });
+        }
+    }
+    pairs.sort((a, b) => a.dist - b.dist);
+
+    const usedCorners = new Set();
+    for (const pair of pairs) {
+        if (usedCorners.has(pair.key) || used.has(pair.index)) continue;
+        assignment[pair.key] = { point: points[pair.index], index: pair.index };
+        usedCorners.add(pair.key);
+        used.add(pair.index);
+    }
+
+    return assignment;
+}
+
+// Render zoomed content into a corner zoom canvas
+function updateCornerZoom(cornerKey, point) {
+    const canvas = cornerZoomCanvases[cornerKey];
+    const ctx = cornerZoomCtxs[cornerKey];
+
+    const label = cornerKey.toUpperCase();
+
+    if (!point) {
+        ctx.clearRect(0, 0, CORNER_ZOOM_SIZE, CORNER_ZOOM_SIZE);
+        canvas.classList.remove('has-point');
+        // Draw label on placeholder
+        ctx.font = '11px monospace';
+        ctx.fillStyle = 'rgba(116, 192, 252, 0.4)';
+        ctx.fillText(label, 4, 13);
+        return;
+    }
+
+    canvas.classList.add('has-point');
+
+    const regionSize = CORNER_ZOOM_SIZE * displayScale / ZOOM_FACTOR;
+    const sx = point.x - regionSize / 2;
+    const sy = point.y - regionSize / 2;
+
+    ctx.clearRect(0, 0, CORNER_ZOOM_SIZE, CORNER_ZOOM_SIZE);
+    ctx.drawImage(
+        sourceCanvas,
+        sx, sy, regionSize, regionSize,
+        0, 0, CORNER_ZOOM_SIZE, CORNER_ZOOM_SIZE
+    );
+
+    // Crosshair at center
+    const center = CORNER_ZOOM_SIZE / 2;
+    const armLength = 12 * ZOOM_FACTOR;
+
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(center - armLength, center);
+    ctx.lineTo(center + armLength, center);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(center, center - armLength);
+    ctx.lineTo(center, center + armLength);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(center - armLength, center);
+    ctx.lineTo(center + armLength, center);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(center, center - armLength);
+    ctx.lineTo(center, center + armLength);
+    ctx.stroke();
+
+    // Center dot
+    ctx.beginPath();
+    ctx.arc(center, center, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#74c0fc';
+    ctx.fill();
+
+    // Corner label
+    ctx.font = '11px monospace';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.fillText(label, 4, 13);
+}
+
+// Update all corner zoom boxes
+function updateAllCornerZooms() {
+    if (!image || !sourceCanvas.width) {
+        currentCornerAssignment = { tl: null, tr: null, bl: null, br: null };
+        for (const key of Object.keys(cornerZoomCanvases)) {
+            updateCornerZoom(key, null);
+        }
+        return;
+    }
+    currentCornerAssignment = assignPointsToCorners();
+    for (const [key, entry] of Object.entries(currentCornerAssignment)) {
+        updateCornerZoom(key, entry ? entry.point : null);
+    }
+}
+
 // Draw points on the canvas - SCALED FOR DISPLAY
 function drawPoints() {
+    if (!pointsCanvas.width || !pointsCanvas.height) return;
     pointsCtx.clearRect(0, 0, pointsCanvas.width, pointsCanvas.height);
-    
-    // Scale line width for display
-    const lineWidth = 2 * displayScale;
-    
+
+    const lineWidth = 2;
+    const scale = 1 / displayScale; // image coords → display coords
+
     if (points.length > 1) {
         pointsCtx.beginPath();
-        pointsCtx.moveTo(points[0].x, points[0].y);
+        pointsCtx.moveTo(points[0].x * scale, points[0].y * scale);
         for (let i = 1; i < points.length; i++) {
-            pointsCtx.lineTo(points[i].x, points[i].y);
+            pointsCtx.lineTo(points[i].x * scale, points[i].y * scale);
         }
         pointsCtx.strokeStyle = '#4dabf7';
         pointsCtx.lineWidth = lineWidth;
         pointsCtx.stroke();
     }
-    
+
     if (points.length >= 3) {
         pointsCtx.beginPath();
-        pointsCtx.moveTo(points[points.length - 1].x, points[points.length - 1].y);
-        pointsCtx.lineTo(points[0].x, points[0].y);
+        pointsCtx.moveTo(points[points.length - 1].x * scale, points[points.length - 1].y * scale);
+        pointsCtx.lineTo(points[0].x * scale, points[0].y * scale);
         pointsCtx.strokeStyle = '#4dabf7';
         pointsCtx.lineWidth = lineWidth;
-        pointsCtx.setLineDash([5 * displayScale, 5 * displayScale]);
+        pointsCtx.setLineDash([5, 5]);
         pointsCtx.stroke();
         pointsCtx.setLineDash([]);
     }
-    
-    for (let i = 0; i < points.length; i++) {
-        const point = points[i];
-        const crosshairSize = 12 * displayScale; // half-length of each arm
-        const centerDotRadius = 3 * displayScale;
 
-        // Crosshair lines (white)
+    for (let i = 0; i < points.length; i++) {
+        const px = points[i].x * scale;
+        const py = points[i].y * scale;
+        const crosshairSize = 12;
+        const centerDotRadius = 3;
+
         pointsCtx.strokeStyle = '#ffffff';
         pointsCtx.lineWidth = lineWidth;
 
-        // Horizontal line
         pointsCtx.beginPath();
-        pointsCtx.moveTo(point.x - crosshairSize, point.y);
-        pointsCtx.lineTo(point.x + crosshairSize, point.y);
+        pointsCtx.moveTo(px - crosshairSize, py);
+        pointsCtx.lineTo(px + crosshairSize, py);
         pointsCtx.stroke();
 
-        // Vertical line
         pointsCtx.beginPath();
-        pointsCtx.moveTo(point.x, point.y - crosshairSize);
-        pointsCtx.lineTo(point.x, point.y + crosshairSize);
+        pointsCtx.moveTo(px, py - crosshairSize);
+        pointsCtx.lineTo(px, py + crosshairSize);
         pointsCtx.stroke();
 
-        // Center dot
         pointsCtx.beginPath();
-        pointsCtx.arc(point.x, point.y, centerDotRadius, 0, Math.PI * 2);
+        pointsCtx.arc(px, py, centerDotRadius, 0, Math.PI * 2);
         pointsCtx.fillStyle = (i === selectedPointIndex && isDragging) ? '#ff6b6b' : '#339af0';
         pointsCtx.fill();
     }
+
+    updateAllCornerZooms();
 }
 
 // Apply perspective correction
@@ -581,12 +852,14 @@ async function selectFolderImage(index) {
     if (saveToOutBtn) saveToOutBtn.disabled = true;
     renderFolderImageList();
 
+    showLoading();
     const file = await loadImageFile(folderImages[index].handle);
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = function() {
         // Save pending points before reset clears them
         const pendingPoints = savedNormalizedPoints;
+        releaseImageMemory();
         image = img;
         setupCanvas();
         resetAllPoints();
@@ -600,6 +873,7 @@ async function selectFolderImage(index) {
             drawPoints();
         }
 
+        hideLoading();
         statusMessage.textContent = `Loaded ${folderImages[index].name} (${img.naturalWidth}×${img.naturalHeight}px)`;
         statusMessage.className = 'status success';
     };
@@ -655,6 +929,18 @@ function resetAllPoints() {
     statusMessage.textContent = "All points reset. Select 4+ points to define perspective correction area.";
     statusMessage.className = "status";
 }
+
+// Reposition corner zooms on window resize (preserve points)
+window.addEventListener('resize', () => {
+    if (!image) return;
+    const savedPoints = points.map(p => ({ x: p.x, y: p.y }));
+    const savedSelected = selectedPointIndex;
+    setupCanvas();
+    points = savedPoints;
+    selectedPointIndex = savedSelected;
+    updatePointCount();
+    drawPoints();
+});
 
 // Initialize on page load
 window.addEventListener('DOMContentLoaded', init);
