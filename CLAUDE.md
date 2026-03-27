@@ -34,7 +34,7 @@ The app uses a **four-layer canvas** stack inside `.canvas-wrapper`:
 - `sourceCanvas` — displays the image at full resolution
 - `gridCanvas` — optional dashed grid overlay (toggle via button)
 - `pointsCanvas` — interactive layer for point selection/dragging
-- `zoomCanvas` — 3x zoom preview always visible when cursor is over the canvas (any mode)
+- `zoomCanvas` — 3x zoom preview always visible when cursor is over the canvas (any mode); shows existing points as light blue crosshairs
 
 Key coordinate concept: canvases render at **original image resolution** but are CSS-scaled to fit the container. `displayScale = imageWidth / displayWidth` converts between mouse coordinates and canvas coordinates.
 

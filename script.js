@@ -271,20 +271,25 @@ function getCanvasCoordinates(event) {
 // Handle mouse down on canvas
 function handleCanvasMouseDown(event) {
     if (!image) return;
-    
+
     const coords = getCanvasCoordinates(event);
     const x = coords.x;
     const y = coords.y;
-    
+
     // Hit detection radius scaled to display
     const hitRadius = 15 * displayScale;
-    
+
+    console.log(`[mousedown] mode=${mode}, click=(${x.toFixed(0)},${y.toFixed(0)}), points=${points.length}, hitRadius=${hitRadius.toFixed(1)}, displayScale=${displayScale.toFixed(2)}`);
+
     for (let i = 0; i < points.length; i++) {
         const point = points[i];
         const distance = Math.sqrt((x - point.x) ** 2 + (y - point.y) ** 2);
-        
+
+        console.log(`  point[${i}]=(${point.x.toFixed(0)},${point.y.toFixed(0)}) distance=${distance.toFixed(1)} ${distance < hitRadius ? 'HIT' : 'miss'}`);
+
         if (distance < hitRadius) {
             if (mode === 'delete') {
+                console.log(`  -> DELETING point[${i}]`);
                 points.splice(i, 1);
                 selectedPointIndex = -1;
                 updatePointCount();
@@ -359,6 +364,36 @@ function updateZoomPreview(pointX, pointY) {
         sx, sy, regionSize, regionSize,
         0, 0, ZOOM_CANVAS_SIZE, ZOOM_CANVAS_SIZE
     );
+
+    // Draw any points visible in the zoom region as light blue crosshairs
+    const pointArmLength = 12 * ZOOM_FACTOR;
+    for (let i = 0; i < points.length; i++) {
+        const px = (points[i].x - sx) / regionSize * ZOOM_CANVAS_SIZE;
+        const py = (points[i].y - sy) / regionSize * ZOOM_CANVAS_SIZE;
+
+        if (px < -pointArmLength || px > ZOOM_CANVAS_SIZE + pointArmLength ||
+            py < -pointArmLength || py > ZOOM_CANVAS_SIZE + pointArmLength) {
+            continue;
+        }
+
+        zoomCtx.strokeStyle = '#74c0fc';
+        zoomCtx.lineWidth = 2;
+
+        zoomCtx.beginPath();
+        zoomCtx.moveTo(px - pointArmLength, py);
+        zoomCtx.lineTo(px + pointArmLength, py);
+        zoomCtx.stroke();
+
+        zoomCtx.beginPath();
+        zoomCtx.moveTo(px, py - pointArmLength);
+        zoomCtx.lineTo(px, py + pointArmLength);
+        zoomCtx.stroke();
+
+        zoomCtx.beginPath();
+        zoomCtx.arc(px, py, 3, 0, Math.PI * 2);
+        zoomCtx.fillStyle = '#74c0fc';
+        zoomCtx.fill();
+    }
 
     // Crosshair overlay at center — dark outline + white line for contrast
     // Arms are 3x the selection crosshair size (12px base arm half-length)
