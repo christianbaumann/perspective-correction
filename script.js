@@ -1,10 +1,11 @@
-import { orderPoints, getCanvasCoordinates as getCoords } from './helpers.js';
+import { orderPoints, getCanvasCoordinates as getCoords, normalizePoints, denormalizePoints } from './helpers.js';
 import { PerspectiveTransform } from './perspectiveTransform.js';
 import { mapPointUsingMVC } from './mvc.js';
 import { downloadCorrectedImage } from './download.js';
 import { applySimplePerspective as applySimple} from './simplePerspectiveApply.js';
 import { applyComplexPerspective as applyComplex} from './complexPerspectiveApply.js';
 import { printCorrectedDocument } from './printCorrectedDocument.js';
+import { isSupported, openFolder, loadImageFile, saveToOut, getNextImageIndex, deriveOutputFilename } from './folderBrowser.js';
 
 // DOM Elements
 const imageInput = document.getElementById('imageInput');
@@ -21,6 +22,13 @@ const resetBtn = document.getElementById('resetBtn');
 const statusMessage = document.getElementById('statusMessage');
 const printBtn = document.getElementById('printBtn');
 
+// Folder browser DOM elements
+const folderBrowserGroup = document.getElementById('folderBrowserGroup');
+const openFolderBtn = document.getElementById('openFolderBtn');
+const folderImageList = document.getElementById('folderImageList');
+const folderPath = document.getElementById('folderPath');
+const saveToOutBtn = document.getElementById('saveToOutBtn');
+
 // Canvas contexts
 const sourceCtx = sourceCanvas.getContext('2d');
 const pointsCtx = pointsCanvas.getContext('2d');
@@ -35,6 +43,14 @@ let transformedImageData = null;
 let originalImageData = null;
 let displayScale = 1; // Scale factor between display and actual image
 
+// Folder browser state
+let folderHandle = null;
+let folderImages = [];
+let currentFolderImageIndex = -1;
+
+// Point persistence state
+let savedNormalizedPoints = null; // Normalized points (0-1) for reuse across folder images
+
 const canvasWrapper = document.querySelector('.canvas-wrapper');
 
 canvasWrapper.addEventListener('mousemove', (e) => {
@@ -48,7 +64,7 @@ canvasWrapper.addEventListener('mousemove', (e) => {
 
 // Initialize
 function init() {
-    printBtn.addEventListener('click', () => printCorrectedDocument({ transformedImageData, statusMessage }));
+    if (printBtn) printBtn.addEventListener('click', () => printCorrectedDocument({ transformedImageData, statusMessage }));
     fileUpload.addEventListener('click', () => imageInput.click());
     imageInput.addEventListener('change', handleImageUpload);
     
@@ -66,12 +82,19 @@ function init() {
     pointsCanvas.addEventListener('mouseleave', handleCanvasMouseUp);
     
     setMode('add');
-    
+
     // Initialize grid
     if (typeof window.initGrid === 'function') {
         window.initGrid();
     }
-    
+
+    // Initialize folder browser if File System Access API is available
+    if (isSupported() && folderBrowserGroup) {
+        folderBrowserGroup.style.display = '';
+        openFolderBtn.addEventListener('click', handleOpenFolder);
+        saveToOutBtn.addEventListener('click', handleSaveToOut);
+    }
+
     loadSampleImage();
 }
 
@@ -364,11 +387,17 @@ function applyPerspectiveCorrection() {
         } else {
             applyComplexPerspective(orderedPoints);
         }
-        printBtn.disabled = false;
-        
+        if (printBtn) printBtn.disabled = false;
+
         // Redraw grid after transformation
         if (typeof window.drawGrid === 'function') {
             window.drawGrid(sourceCanvas, displayScale);
+        }
+
+        // In folder-browser mode: save normalized points and auto-save/advance
+        if (folderHandle && currentFolderImageIndex >= 0) {
+            savedNormalizedPoints = normalizePoints(points, sourceCanvas.width, sourceCanvas.height);
+            handleSaveToOut();
         }
     } catch (error) {
         console.error("Perspective correction error:", error);
@@ -387,13 +416,95 @@ function applyComplexPerspective(orderedPoints) {
     transformedImageData = applyComplex(orderedPoints, { sourceCtx, pointsCanvas, downloadBtn, statusMessage });
 }
 
+// --- Folder Browser Functions ---
+
+async function handleOpenFolder() {
+    try {
+        const result = await openFolder();
+        folderHandle = result.dirHandle;
+        folderImages = result.imageFiles;
+        folderPath.textContent = `📂 ${folderHandle.name}`;
+        renderFolderImageList();
+        if (folderImages.length > 0) {
+            selectFolderImage(0);
+        }
+    } catch (e) {
+        if (e.name !== 'AbortError') {
+            statusMessage.textContent = `Error opening folder: ${e.message}`;
+            statusMessage.className = 'status error';
+        }
+    }
+}
+
+function renderFolderImageList() {
+    folderImageList.innerHTML = '';
+    folderImages.forEach((img, i) => {
+        const item = document.createElement('div');
+        item.className = 'folder-image-item' + (i === currentFolderImageIndex ? ' active' : '');
+        item.textContent = img.name;
+        item.dataset.index = i;
+        item.setAttribute('role', 'option');
+        item.setAttribute('aria-selected', i === currentFolderImageIndex ? 'true' : 'false');
+        item.addEventListener('click', () => selectFolderImage(i));
+        folderImageList.appendChild(item);
+    });
+}
+
+async function selectFolderImage(index) {
+    currentFolderImageIndex = index;
+    if (saveToOutBtn) saveToOutBtn.disabled = true;
+    renderFolderImageList();
+
+    const file = await loadImageFile(folderImages[index].handle);
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = function() {
+        // Save pending points before reset clears them
+        const pendingPoints = savedNormalizedPoints;
+        image = img;
+        setupCanvas();
+        resetAllPoints();
+        URL.revokeObjectURL(url);
+
+        // Restore saved points from previous image (scaled to new dimensions)
+        if (pendingPoints && pendingPoints.length > 0) {
+            savedNormalizedPoints = pendingPoints;
+            points = denormalizePoints(pendingPoints, sourceCanvas.width, sourceCanvas.height);
+            updatePointCount();
+            drawPoints();
+        }
+
+        statusMessage.textContent = `Loaded ${folderImages[index].name} (${img.naturalWidth}×${img.naturalHeight}px)`;
+        statusMessage.className = 'status success';
+    };
+    img.src = url;
+}
+
+async function handleSaveToOut() {
+    try {
+        const filename = deriveOutputFilename(folderImages[currentFolderImageIndex].name);
+        await saveToOut(folderHandle, filename, sourceCanvas);
+        statusMessage.textContent = `Saved ${filename} to out/`;
+        statusMessage.className = 'status success';
+        if (saveToOutBtn) saveToOutBtn.disabled = true;
+
+        // Auto-advance to next image
+        const nextIndex = getNextImageIndex(currentFolderImageIndex, folderImages.length);
+        await selectFolderImage(nextIndex);
+    } catch (e) {
+        statusMessage.textContent = `Save failed: ${e.message}`;
+        statusMessage.className = 'status error';
+    }
+}
+
 // Reset all points and restore original image
 function resetAllPoints() {
     points = [];
+    savedNormalizedPoints = null;
     selectedPointIndex = -1;
     isDragging = false;
     transformedImageData = null;
-    
+
     if (originalImageData) {
         sourceCtx.putImageData(originalImageData, 0, 0);
     } else if (image) {
@@ -401,10 +512,10 @@ function resetAllPoints() {
         const imageHeight = image.naturalHeight || image.height;
         sourceCtx.drawImage(image, 0, 0, imageWidth, imageHeight);
     }
-    
+
     pointsCanvas.style.pointerEvents = 'all';
     downloadBtn.disabled = true;
-    printBtn.disabled = true;
+    if (printBtn) printBtn.disabled = true;
 
     updatePointCount();
     drawPoints();
