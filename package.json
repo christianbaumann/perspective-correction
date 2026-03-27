@@ -1,0 +1,17 @@
+{
+  "name": "perspective-correction",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:all": "vitest run && playwright test",
+    "serve": "node server.cjs"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0",
+    "@playwright/test": "^1.44.0",
+    "jsdom": "^24.0.0",
+    "@vitest/coverage-v8": "^2.0.0"
+  }
+}
