@@ -33,6 +33,14 @@ const saveToOutBtn = document.getElementById('saveToOutBtn');
 const sourceCtx = sourceCanvas.getContext('2d');
 const pointsCtx = pointsCanvas.getContext('2d');
 
+// Zoom preview
+const zoomCanvas = document.getElementById('zoomCanvas');
+const zoomCtx = zoomCanvas.getContext('2d');
+const ZOOM_FACTOR = 3;
+const ZOOM_CANVAS_SIZE = 200;
+zoomCanvas.width = ZOOM_CANVAS_SIZE;
+zoomCanvas.height = ZOOM_CANVAS_SIZE;
+
 // State variables
 let image = null;
 let points = [];
@@ -79,7 +87,10 @@ function init() {
     pointsCanvas.addEventListener('mousedown', handleCanvasMouseDown);
     pointsCanvas.addEventListener('mousemove', handleCanvasMouseMove);
     pointsCanvas.addEventListener('mouseup', handleCanvasMouseUp);
-    pointsCanvas.addEventListener('mouseleave', handleCanvasMouseUp);
+    pointsCanvas.addEventListener('mouseleave', () => {
+        handleCanvasMouseUp();
+        hideZoomPreview();
+    });
     
     setMode('add');
 
@@ -223,7 +234,7 @@ function setupCanvas() {
 // Set the current interaction mode
 function setMode(newMode) {
     mode = newMode;
-    
+
     addPointsBtn.classList.remove('active');
     movePointsBtn.classList.remove('active');
     deletePointsBtn.classList.remove('active');
@@ -282,6 +293,7 @@ function handleCanvasMouseDown(event) {
             } else if (mode === 'move') {
                 selectedPointIndex = i;
                 isDragging = true;
+                updateZoomPreview(point.x, point.y);
                 drawPoints();
                 return;
             }
@@ -298,16 +310,23 @@ function handleCanvasMouseDown(event) {
 
 // Handle mouse move on canvas
 function handleCanvasMouseMove(event) {
-    if (!image || mode !== 'move' || !isDragging || selectedPointIndex < 0) return;
-    
+    if (!image) return;
+
     const coords = getCanvasCoordinates(event);
-    const x = Math.max(0, Math.min(sourceCanvas.width, coords.x));
-    const y = Math.max(0, Math.min(sourceCanvas.height, coords.y));
-    
-    points[selectedPointIndex].x = x;
-    points[selectedPointIndex].y = y;
-    
-    drawPoints();
+
+    // Always show zoom preview at cursor position
+    updateZoomPreview(coords.x, coords.y);
+
+    // Handle dragging in move mode
+    if (mode === 'move' && isDragging && selectedPointIndex >= 0) {
+        const x = Math.max(0, Math.min(sourceCanvas.width, coords.x));
+        const y = Math.max(0, Math.min(sourceCanvas.height, coords.y));
+
+        points[selectedPointIndex].x = x;
+        points[selectedPointIndex].y = y;
+
+        drawPoints();
+    }
 }
 
 // Handle mouse up on canvas
@@ -321,14 +340,76 @@ function updatePointCount() {
     transformBtn.disabled = points.length < 4;
 }
 
+// Zoom preview functions
+function updateZoomPreview(pointX, pointY) {
+    if (!image || !sourceCanvas.width) {
+        zoomCanvas.style.display = 'none';
+        return;
+    }
+
+    zoomCanvas.style.display = 'block';
+
+    const regionSize = ZOOM_CANVAS_SIZE * displayScale / ZOOM_FACTOR;
+    const sx = pointX - regionSize / 2;
+    const sy = pointY - regionSize / 2;
+
+    zoomCtx.clearRect(0, 0, ZOOM_CANVAS_SIZE, ZOOM_CANVAS_SIZE);
+    zoomCtx.drawImage(
+        sourceCanvas,
+        sx, sy, regionSize, regionSize,
+        0, 0, ZOOM_CANVAS_SIZE, ZOOM_CANVAS_SIZE
+    );
+
+    // Crosshair overlay at center — dark outline + white line for contrast
+    // Arms are 3x the selection crosshair size (12px base arm half-length)
+    const center = ZOOM_CANVAS_SIZE / 2;
+    const armLength = 36;
+
+    // Dark outline pass
+    zoomCtx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+    zoomCtx.lineWidth = 3;
+
+    zoomCtx.beginPath();
+    zoomCtx.moveTo(center - armLength, center);
+    zoomCtx.lineTo(center + armLength, center);
+    zoomCtx.stroke();
+
+    zoomCtx.beginPath();
+    zoomCtx.moveTo(center, center - armLength);
+    zoomCtx.lineTo(center, center + armLength);
+    zoomCtx.stroke();
+
+    // White line pass
+    zoomCtx.strokeStyle = '#ffffff';
+    zoomCtx.lineWidth = 1.5;
+
+    zoomCtx.beginPath();
+    zoomCtx.moveTo(center - armLength, center);
+    zoomCtx.lineTo(center + armLength, center);
+    zoomCtx.stroke();
+
+    zoomCtx.beginPath();
+    zoomCtx.moveTo(center, center - armLength);
+    zoomCtx.lineTo(center, center + armLength);
+    zoomCtx.stroke();
+
+    // Center dot
+    zoomCtx.beginPath();
+    zoomCtx.arc(center, center, 3, 0, Math.PI * 2);
+    zoomCtx.fillStyle = '#ff6b6b';
+    zoomCtx.fill();
+}
+
+function hideZoomPreview() {
+    zoomCanvas.style.display = 'none';
+}
+
 // Draw points on the canvas - SCALED FOR DISPLAY
 function drawPoints() {
     pointsCtx.clearRect(0, 0, pointsCanvas.width, pointsCanvas.height);
     
-    // Scale line width and point size for display
+    // Scale line width for display
     const lineWidth = 2 * displayScale;
-    const pointRadius = 8 * displayScale;
-    const fontSize = 14 * displayScale;
     
     if (points.length > 1) {
         pointsCtx.beginPath();
@@ -354,20 +435,30 @@ function drawPoints() {
     
     for (let i = 0; i < points.length; i++) {
         const point = points[i];
-        
-        pointsCtx.beginPath();
-        pointsCtx.arc(point.x, point.y, pointRadius, 0, Math.PI * 2);
-        pointsCtx.fillStyle = (i === selectedPointIndex && isDragging) ? '#ff6b6b' : '#339af0';
-        pointsCtx.fill();
+        const crosshairSize = 12 * displayScale; // half-length of each arm
+        const centerDotRadius = 3 * displayScale;
+
+        // Crosshair lines (white)
         pointsCtx.strokeStyle = '#ffffff';
         pointsCtx.lineWidth = lineWidth;
+
+        // Horizontal line
+        pointsCtx.beginPath();
+        pointsCtx.moveTo(point.x - crosshairSize, point.y);
+        pointsCtx.lineTo(point.x + crosshairSize, point.y);
         pointsCtx.stroke();
-        
-        pointsCtx.fillStyle = '#ffffff';
-        pointsCtx.font = `bold ${fontSize}px Arial`;
-        pointsCtx.textAlign = 'center';
-        pointsCtx.textBaseline = 'middle';
-        pointsCtx.fillText(i + 1, point.x, point.y);
+
+        // Vertical line
+        pointsCtx.beginPath();
+        pointsCtx.moveTo(point.x, point.y - crosshairSize);
+        pointsCtx.lineTo(point.x, point.y + crosshairSize);
+        pointsCtx.stroke();
+
+        // Center dot
+        pointsCtx.beginPath();
+        pointsCtx.arc(point.x, point.y, centerDotRadius, 0, Math.PI * 2);
+        pointsCtx.fillStyle = (i === selectedPointIndex && isDragging) ? '#ff6b6b' : '#339af0';
+        pointsCtx.fill();
     }
 }
 
@@ -504,6 +595,7 @@ function resetAllPoints() {
     selectedPointIndex = -1;
     isDragging = false;
     transformedImageData = null;
+    hideZoomPreview();
 
     if (originalImageData) {
         sourceCtx.putImageData(originalImageData, 0, 0);
