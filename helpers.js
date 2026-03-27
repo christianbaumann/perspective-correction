@@ -45,3 +45,17 @@ export function getCanvasCoordinates(event, canvas) {
     return { x, y };
 }
 
+export function normalizePoints(points, width, height) {
+    return points.map(p => ({
+        x: p.x / width,
+        y: p.y / height
+    }));
+}
+
+export function denormalizePoints(normalizedPoints, width, height) {
+    return normalizedPoints.map(p => ({
+        x: p.x * width,
+        y: p.y * height
+    }));
+}
+
