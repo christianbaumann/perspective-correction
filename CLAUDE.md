@@ -30,16 +30,17 @@ npx playwright test      # e2e tests (Chromium)
 
 ## Architecture
 
-The app uses a **three-layer canvas** stack inside `.canvas-wrapper`:
+The app uses a **four-layer canvas** stack inside `.canvas-wrapper`:
 - `sourceCanvas` — displays the image at full resolution
 - `gridCanvas` — optional dashed grid overlay (toggle via button)
 - `pointsCanvas` — interactive layer for point selection/dragging
+- `zoomCanvas` — 3x zoom preview always visible when cursor is over the canvas (any mode)
 
 Key coordinate concept: canvases render at **original image resolution** but are CSS-scaled to fit the container. `displayScale = imageWidth / displayWidth` converts between mouse coordinates and canvas coordinates.
 
 ### Module Responsibilities
 
-- **`script.js`** — main entry point. Handles image upload, point interaction (add/move/delete modes), canvas setup, and orchestrates correction. Imports all other modules.
+- **`script.js`** — main entry point. Handles image upload, point interaction (add/move/delete modes), canvas setup, zoom preview, and orchestrates correction. Points render as crosshairs with a colored center dot (blue default, red when dragging). Imports all other modules.
 - **`folderBrowser.js`** — folder browser panel: open a local folder via File System Access API, browse images, save corrected output to `out/` subfolder, auto-advance to next image. Chrome-only.
 - **`helpers.js`** — `orderPoints()`, `getCanvasCoordinates()`, `normalizePoints()`/`denormalizePoints()` for persisting points across images of different sizes.
 - **`perspectiveTransform.js`** — `PerspectiveTransform` class: computes an 8-parameter homography matrix from 4 src/dst point pairs via Gaussian elimination. Used by the simple (4-point) path.
