@@ -41,15 +41,21 @@ export async function loadImageFile(fileHandle) {
  * filename should include extension, e.g. "scan001.png".
  */
 export async function saveToOut(dirHandle, filename, canvas) {
+  const t0 = performance.now();
   const outDir = await dirHandle.getDirectoryHandle('out', { create: true });
   const fileHandle = await outDir.getFileHandle(filename, { create: true });
   const writable = await fileHandle.createWritable();
+  console.log(`[PERF]       saveToOut: FS handles ready: ${(performance.now() - t0).toFixed(1)}ms`);
   await new Promise((resolve, reject) => {
+    const tBlob = performance.now();
     canvas.toBlob(async (blob) => {
       if (!blob) { reject(new Error('toBlob returned null')); return; }
+      console.log(`[PERF]       saveToOut: toBlob (PNG encode): ${(performance.now() - tBlob).toFixed(1)}ms (${(blob.size/1024/1024).toFixed(1)} MB)`);
       try {
+        const tWrite = performance.now();
         await writable.write(blob);
         await writable.close();
+        console.log(`[PERF]       saveToOut: file write+close: ${(performance.now() - tWrite).toFixed(1)}ms`);
         resolve();
       } catch (e) { reject(e); }
     }, 'image/png', 1.0);

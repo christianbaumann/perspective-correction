@@ -34,7 +34,7 @@ export function applySimplePerspective(orderedPoints, { sourceCtx, pointsCanvas,
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = destWidth;
     tempCanvas.height = destHeight;
-    const tempCtx = tempCanvas.getContext('2d');
+    const tempCtx = tempCanvas.getContext('2d', { alpha: false });
 
     const imageData = sourceCtx.getImageData(0, 0, sourceCtx.canvas.width, sourceCtx.canvas.height);
     const destImageData = tempCtx.createImageData(destWidth, destHeight);
@@ -42,16 +42,28 @@ export function applySimplePerspective(orderedPoints, { sourceCtx, pointsCanvas,
     for (let y = 0; y < destHeight; y++) {
         for (let x = 0; x < destWidth; x++) {
             const srcCoords = transform.transform(x, y);
-            const srcX = Math.round(srcCoords[0]);
-            const srcY = Math.round(srcCoords[1]);
-
+            const srcX = srcCoords[0];
+            const srcY = srcCoords[1];
             const destIndex = (y * destWidth + x) * 4;
+            const imgW = sourceCtx.canvas.width;
+            const imgH = sourceCtx.canvas.height;
 
-            if (srcX >= 0 && srcX < sourceCtx.canvas.width && srcY >= 0 && srcY < sourceCtx.canvas.height) {
-                const srcIndex = (srcY * sourceCtx.canvas.width + srcX) * 4;
-                destImageData.data[destIndex] = imageData.data[srcIndex];
-                destImageData.data[destIndex + 1] = imageData.data[srcIndex + 1];
-                destImageData.data[destIndex + 2] = imageData.data[srcIndex + 2];
+            if (srcX >= -0.5 && srcX < imgW && srcY >= -0.5 && srcY < imgH) {
+                const sx = Math.max(0, Math.min(imgW - 1.001, srcX));
+                const sy = Math.max(0, Math.min(imgH - 1.001, srcY));
+                const x1 = Math.floor(sx), y1 = Math.floor(sy);
+                const x2 = Math.min(x1 + 1, imgW - 1);
+                const y2 = Math.min(y1 + 1, imgH - 1);
+                const dx = sx - x1, dy = sy - y1;
+                const w11 = (1-dx)*(1-dy), w12 = dx*(1-dy), w21 = (1-dx)*dy, w22 = dx*dy;
+                const d = imageData.data;
+                const i11 = (y1 * imgW + x1) * 4;
+                const i12 = (y1 * imgW + x2) * 4;
+                const i21 = (y2 * imgW + x1) * 4;
+                const i22 = (y2 * imgW + x2) * 4;
+                destImageData.data[destIndex]     = (d[i11]*w11 + d[i12]*w12 + d[i21]*w21 + d[i22]*w22 + 0.5) | 0;
+                destImageData.data[destIndex + 1] = (d[i11+1]*w11 + d[i12+1]*w12 + d[i21+1]*w21 + d[i22+1]*w22 + 0.5) | 0;
+                destImageData.data[destIndex + 2] = (d[i11+2]*w11 + d[i12+2]*w12 + d[i21+2]*w21 + d[i22+2]*w22 + 0.5) | 0;
                 destImageData.data[destIndex + 3] = 255;
             } else {
                 destImageData.data[destIndex] = 255;

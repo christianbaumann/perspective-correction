@@ -1,9 +1,5 @@
 import { test, expect } from '@playwright/test';
 
-// Minimal 1x1 white PNG as base64
-const WHITE_1X1_PNG =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==';
-
 async function mockFS(page, { dirName = 'test-folder', imageFiles = [] } = {}) {
   await page.addInitScript(({ dirName, imageFiles }) => {
     const makeWritable = () => ({
@@ -17,12 +13,16 @@ async function mockFS(page, { dirName = 'test-folder', imageFiles = [] } = {}) {
         createWritable: async () => makeWritable(),
       }),
     };
-    const fileHandles = imageFiles.map(({ name, b64 }) => ({
+    const fileHandles = imageFiles.map(({ name }) => ({
       kind: 'file', name,
       getFile: async () => {
-        const bin = atob(b64);
-        const bytes = new Uint8Array(bin.length).map((_, i) => bin.charCodeAt(i));
-        return new File([bytes], name, { type: 'image/png' });
+        // Generate a small PNG via OffscreenCanvas (compatible with createImageBitmap)
+        const oc = new OffscreenCanvas(4, 4);
+        const ctx = oc.getContext('2d');
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, 4, 4);
+        const blob = await oc.convertToBlob({ type: 'image/png' });
+        return new File([blob], name, { type: 'image/png' });
       },
     }));
     window.showDirectoryPicker = async () => ({
@@ -45,7 +45,7 @@ async function applyCorrection(page) {
 
 test('smoke: folder browser section visible and first image auto-loads into canvas', async ({ page }) => {
   await mockFS(page, {
-    imageFiles: [{ name: 'first.png', b64: WHITE_1X1_PNG }],
+    imageFiles: [{ name: 'first.png', b64: '' }],
   });
   await page.goto('/');
   await expect(page.locator('#folderBrowserGroup')).toBeVisible();
@@ -53,28 +53,26 @@ test('smoke: folder browser section visible and first image auto-loads into canv
   await expect(page.locator('#statusMessage')).toContainText('first.png', { timeout: 5000 });
 });
 
-test('correct → save → auto-advance to next image', async ({ page }) => {
+test('correct → auto-save → auto-advance to next image', async ({ page }) => {
   await mockFS(page, {
     imageFiles: [
-      { name: 'img1.jpg', b64: WHITE_1X1_PNG },
-      { name: 'img2.jpg', b64: WHITE_1X1_PNG },
+      { name: 'img1.jpg', b64: '' },
+      { name: 'img2.jpg', b64: '' },
     ],
   });
   await page.goto('/');
   await page.click('#openFolderBtn');
   await expect(page.locator('#statusMessage')).toContainText('img1.jpg', { timeout: 5000 });
   await applyCorrection(page);
-  await expect(page.locator('#saveToOutBtn')).toBeEnabled();
-  await page.click('#saveToOutBtn');
-  // Save auto-advances to next image; status may already show "Loaded img2" by now
-  await expect(page.locator('.folder-image-item.active')).toContainText('img2.jpg');
+  // Correction in folder mode auto-saves and auto-advances to next image
+  await expect(page.locator('.folder-image-item.active')).toContainText('img2.jpg', { timeout: 5000 });
 });
 
-test('wrap-around: saving last image loads first image', async ({ page }) => {
+test('wrap-around: correcting last image auto-advances to first image', async ({ page }) => {
   await mockFS(page, {
     imageFiles: [
-      { name: 'a.png', b64: WHITE_1X1_PNG },
-      { name: 'b.png', b64: WHITE_1X1_PNG },
+      { name: 'a.png', b64: '' },
+      { name: 'b.png', b64: '' },
     ],
   });
   await page.goto('/');
@@ -82,49 +80,51 @@ test('wrap-around: saving last image loads first image', async ({ page }) => {
   await page.locator('.folder-image-item').nth(1).click();
   await expect(page.locator('#statusMessage')).toContainText('b.png', { timeout: 5000 });
   await applyCorrection(page);
-  await page.click('#saveToOutBtn');
-  await expect(page.locator('.folder-image-item.active')).toContainText('a.png');
+  // Auto-save + auto-advance wraps around to first image
+  await expect(page.locator('.folder-image-item.active')).toContainText('a.png', { timeout: 5000 });
 });
 
-test('single-image folder: stays on same image after save', async ({ page }) => {
+test('single-image folder: stays on same image after correction', async ({ page }) => {
   await mockFS(page, {
-    imageFiles: [{ name: 'solo.jpg', b64: WHITE_1X1_PNG }],
+    imageFiles: [{ name: 'solo.jpg', b64: '' }],
   });
   await page.goto('/');
   await page.click('#openFolderBtn');
   await expect(page.locator('#statusMessage')).toContainText('solo.jpg', { timeout: 5000 });
   await applyCorrection(page);
-  await page.click('#saveToOutBtn');
-  await expect(page.locator('.folder-image-item.active')).toContainText('solo.jpg');
+  // Auto-save wraps around to same (only) image
+  await expect(page.locator('.folder-image-item.active')).toContainText('solo.jpg', { timeout: 5000 });
 });
 
 test('save failure shows error in status (permission denied on getDirectoryHandle)', async ({ page }) => {
-  const b64 = WHITE_1X1_PNG;
-  await page.addInitScript((b64) => {
+  await page.addInitScript(() => {
     window.showDirectoryPicker = async () => ({
       kind: 'directory', name: 'locked',
       values: async function* () {
-        const bin = atob(b64);
-        const bytes = new Uint8Array(bin.length).map((_, i) => bin.charCodeAt(i));
-        yield { kind: 'file', name: 'img.png', getFile: async () => new File([bytes], 'img.png', { type: 'image/png' }) };
+        const oc = new OffscreenCanvas(4, 4);
+        const ctx = oc.getContext('2d');
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, 4, 4);
+        const blob = await oc.convertToBlob({ type: 'image/png' });
+        yield { kind: 'file', name: 'img.png', getFile: async () => new File([blob], 'img.png', { type: 'image/png' }) };
       },
       getDirectoryHandle: async () => { throw new DOMException('Not allowed', 'NotAllowedError'); },
     });
-  }, b64);
+  });
   await page.goto('/');
   await page.click('#openFolderBtn');
   await expect(page.locator('#statusMessage')).toContainText('img.png', { timeout: 5000 });
   await applyCorrection(page);
-  await page.click('#saveToOutBtn');
-  await expect(page.locator('#statusMessage')).toContainText('Save failed');
+  // Auto-save triggers on correction in folder mode and hits the permission error
+  await expect(page.locator('#statusMessage')).toContainText('Save failed', { timeout: 5000 });
   await expect(page.locator('#statusMessage')).toHaveClass(/error/);
 });
 
 test('correct → auto-advance → points restored on next image', async ({ page }) => {
   await mockFS(page, {
     imageFiles: [
-      { name: 'img1.png', b64: WHITE_1X1_PNG },
-      { name: 'img2.png', b64: WHITE_1X1_PNG },
+      { name: 'img1.png', b64: '' },
+      { name: 'img2.png', b64: '' },
     ],
   });
   await page.goto('/');
@@ -140,9 +140,9 @@ test('correct → auto-advance → points restored on next image', async ({ page
 test('reset clears saved points — next image has no points', async ({ page }) => {
   await mockFS(page, {
     imageFiles: [
-      { name: 'a.png', b64: WHITE_1X1_PNG },
-      { name: 'b.png', b64: WHITE_1X1_PNG },
-      { name: 'c.png', b64: WHITE_1X1_PNG },
+      { name: 'a.png', b64: '' },
+      { name: 'b.png', b64: '' },
+      { name: 'c.png', b64: '' },
     ],
   });
   await page.goto('/');

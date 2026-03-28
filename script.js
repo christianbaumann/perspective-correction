@@ -4,6 +4,7 @@ import { mapPointUsingMVC } from './mvc.js';
 import { downloadCorrectedImage } from './download.js';
 import { applySimplePerspective as applySimple} from './simplePerspectiveApply.js';
 import { applyComplexPerspective as applyComplex} from './complexPerspectiveApply.js';
+import { isWebGLSupported, applyWebGLPerspective } from './webglPerspective.js';
 import { printCorrectedDocument } from './printCorrectedDocument.js';
 import { isSupported, openFolder, loadImageFile, saveToOut, getNextImageIndex, deriveOutputFilename } from './folderBrowser.js';
 
@@ -31,7 +32,7 @@ const folderPath = document.getElementById('folderPath');
 const saveToOutBtn = document.getElementById('saveToOutBtn');
 
 // Canvas contexts
-const sourceCtx = sourceCanvas.getContext('2d');
+const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
 const pointsCtx = pointsCanvas.getContext('2d');
 
 // Zoom preview
@@ -77,6 +78,11 @@ let currentFolderImageIndex = -1;
 // Point persistence state
 let savedNormalizedPoints = null; // Normalized points (0-1) for reuse across folder images
 
+// Prefetch state
+let prefetchGeneration = 0;
+let prefetchedBitmap = null;
+let prefetchedIndex = -1;
+
 function releaseImageMemory() {
     originalImageData = null;
     transformedImageData = null;
@@ -85,6 +91,32 @@ function releaseImageMemory() {
     sourceCanvas.height = 0;
     pointsCanvas.width = 0;
     pointsCanvas.height = 0;
+    // Clean up prefetch
+    if (prefetchedBitmap) {
+        prefetchedBitmap.close();
+        prefetchedBitmap = null;
+        prefetchedIndex = -1;
+    }
+    prefetchGeneration++;
+}
+
+async function prefetchNextImage(nextIndex) {
+    const gen = ++prefetchGeneration;
+    try {
+        const tPrefetch = performance.now();
+        const file = await folderImages[nextIndex].handle.getFile();
+        const bitmap = await createImageBitmap(file);
+        if (gen !== prefetchGeneration) {
+            bitmap.close();
+            return;
+        }
+        if (prefetchedBitmap) prefetchedBitmap.close();
+        prefetchedBitmap = bitmap;
+        prefetchedIndex = nextIndex;
+        console.log(`[PERF]     prefetch image ${nextIndex}: ${(performance.now() - tPrefetch).toFixed(1)}ms (${bitmap.width}×${bitmap.height})`);
+    } catch (e) {
+        console.warn('Prefetch failed:', e);
+    }
 }
 
 function showLoading() { if (loadingOverlay) loadingOverlay.style.display = ''; }
@@ -178,12 +210,19 @@ function loadSampleImage() {
     showLoading();
     const sampleImage = new Image();
     sampleImage.onload = function() {
-        releaseImageMemory();
-        image = sampleImage;
-        setupCanvas();
-        hideLoading();
-        statusMessage.textContent = "Sample image loaded. Select 4+ points to define perspective correction area.";
-        statusMessage.className = "status success";
+        try {
+            console.log('[BUG-DEBUG] sampleImage.onload fired');
+            releaseImageMemory();
+            image = sampleImage;
+            setupCanvas();
+            hideLoading();
+            console.log('[BUG-DEBUG] sampleImage loaded OK');
+            statusMessage.textContent = "Sample image loaded. Select 4+ points to define perspective correction area.";
+            statusMessage.className = "status success";
+        } catch (err) {
+            console.error('[BUG-DEBUG] Error in sampleImage.onload:', err);
+            hideLoading();
+        }
     };
     sampleImage.onerror = function() {
         hideLoading();
@@ -203,14 +242,19 @@ function handleImageUpload(event) {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = function() {
-        releaseImageMemory();
-        image = img;
-        setupCanvas();
-        resetAllPoints();
-        URL.revokeObjectURL(url);
-        hideLoading();
-        statusMessage.textContent = `Image loaded (${img.naturalWidth}×${img.naturalHeight}px). Original resolution preserved. Select 4+ points.`;
-        statusMessage.className = "status success";
+        try {
+            releaseImageMemory();
+            image = img;
+            setupCanvas();
+            resetAllPoints();
+            URL.revokeObjectURL(url);
+            hideLoading();
+            statusMessage.textContent = `Image loaded (${img.naturalWidth}×${img.naturalHeight}px). Original resolution preserved. Select 4+ points.`;
+            statusMessage.className = "status success";
+        } catch (err) {
+            console.error('[BUG-DEBUG] Error in handleImageUpload.onload:', err);
+            hideLoading();
+        }
     };
     img.onerror = function() {
         URL.revokeObjectURL(url);
@@ -777,24 +821,35 @@ function applyPerspectiveCorrection() {
     }
     
     try {
+        const tPipeline = performance.now();
+        console.log(`[PERF] ─── Pipeline start ───`);
+
+        const t0 = performance.now();
         const orderedPoints = orderPoints(points);
-        
         if (orderedPoints.length === 4) {
             applySimplePerspective(orderedPoints);
         } else {
             applyComplexPerspective(orderedPoints);
         }
+        console.log(`[PERF]   1. Correction: ${(performance.now() - t0).toFixed(1)}ms (${orderedPoints.length} points)`);
+
         if (printBtn) printBtn.disabled = false;
 
-        // Redraw grid after transformation
+        const tGrid = performance.now();
         if (typeof window.drawGrid === 'function') {
             window.drawGrid(sourceCanvas, displayScale);
         }
+        console.log(`[PERF]   2. Draw grid: ${(performance.now() - tGrid).toFixed(1)}ms`);
 
         // In folder-browser mode: save normalized points and auto-save/advance
         if (folderHandle && currentFolderImageIndex >= 0) {
             savedNormalizedPoints = normalizePoints(points, sourceCanvas.width, sourceCanvas.height);
-            handleSaveToOut();
+            console.log(`[PERF]   3. Starting save+advance (async)...`);
+            handleSaveToOut().then(() => {
+                console.log(`[PERF] ─── Pipeline total: ${(performance.now() - tPipeline).toFixed(1)}ms ───`);
+            });
+        } else {
+            console.log(`[PERF] ─── Pipeline total: ${(performance.now() - tPipeline).toFixed(1)}ms ───`);
         }
     } catch (error) {
         console.error("Perspective correction error:", error);
@@ -803,8 +858,45 @@ function applyPerspectiveCorrection() {
     }
 }
 
-// Simple 4-point perspective correction
+// Simple 4-point perspective correction (WebGL with JS fallback)
 function applySimplePerspective(orderedPoints) {
+    if (isWebGLSupported()) {
+        try {
+            // Calculate bounding box for output dimensions (same logic as JS path)
+            let minX = sourceCtx.canvas.width, maxX = 0, minY = sourceCtx.canvas.height, maxY = 0;
+            for (const p of orderedPoints) {
+                minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+                minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+            }
+            const destWidth = Math.max(10, Math.round(maxX - minX));
+            const destHeight = Math.max(10, Math.round(maxY - minY));
+
+            const result = applyWebGLPerspective(sourceCanvas, orderedPoints, destWidth, destHeight);
+
+            // Draw result onto sourceCanvas (same as JS path)
+            sourceCtx.clearRect(0, 0, sourceCtx.canvas.width, sourceCtx.canvas.height);
+            sourceCtx.drawImage(result.canvas, minX, minY, destWidth, destHeight);
+
+            pointsCanvas.style.pointerEvents = 'none';
+            downloadBtn.disabled = false;
+
+            statusMessage.textContent = `Perspective correction applied (WebGL)! Corrected area: ${destWidth}×${destHeight} pixels.`;
+            statusMessage.className = 'status success';
+
+            transformedImageData = {
+                canvas: result.canvas,
+                width: destWidth,
+                height: destHeight,
+                offsetX: minX,
+                offsetY: minY,
+                orderedPoints: orderedPoints
+            };
+            return;
+        } catch (e) {
+            console.warn('WebGL perspective failed, falling back to JS:', e);
+        }
+    }
+    // JS fallback
     transformedImageData = applySimple(orderedPoints, { sourceCtx, pointsCanvas, downloadBtn, statusMessage });
 }
 
@@ -853,17 +945,47 @@ async function selectFolderImage(index) {
     renderFolderImageList();
 
     showLoading();
-    const file = await loadImageFile(folderImages[index].handle);
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = function() {
+    const tLoad = performance.now();
+    try {
+        const tFile = performance.now();
+        const file = await loadImageFile(folderImages[index].handle);
+        console.log(`[PERF]     loadImageFile: ${(performance.now() - tFile).toFixed(1)}ms (${(file.size/1024/1024).toFixed(1)} MB)`);
+
+        let bitmap;
+        if (prefetchedBitmap && prefetchedIndex === index) {
+            bitmap = prefetchedBitmap;
+            prefetchedBitmap = null;
+            prefetchedIndex = -1;
+            console.log(`[PERF]     prefetch HIT for index ${index}`);
+        } else {
+            // Invalidate stale prefetch
+            prefetchGeneration++;
+            if (prefetchedBitmap) {
+                prefetchedBitmap.close();
+                prefetchedBitmap = null;
+                prefetchedIndex = -1;
+            }
+            const tDecode = performance.now();
+            bitmap = await createImageBitmap(file);
+            console.log(`[PERF]     createImageBitmap: ${(performance.now() - tDecode).toFixed(1)}ms (${bitmap.width}×${bitmap.height})`);
+        }
+
         // Save pending points before reset clears them
         const pendingPoints = savedNormalizedPoints;
+
+        const tRelease = performance.now();
         releaseImageMemory();
-        image = img;
+        console.log(`[PERF]     releaseImageMemory: ${(performance.now() - tRelease).toFixed(1)}ms`);
+
+        image = bitmap;
+
+        const tSetup = performance.now();
         setupCanvas();
+        console.log(`[PERF]     setupCanvas: ${(performance.now() - tSetup).toFixed(1)}ms`);
+
+        const tReset = performance.now();
         resetAllPoints();
-        URL.revokeObjectURL(url);
+        console.log(`[PERF]     resetAllPoints: ${(performance.now() - tReset).toFixed(1)}ms`);
 
         // Restore saved points from previous image (scaled to new dimensions)
         if (pendingPoints && pendingPoints.length > 0) {
@@ -874,23 +996,40 @@ async function selectFolderImage(index) {
         }
 
         hideLoading();
-        statusMessage.textContent = `Loaded ${folderImages[index].name} (${img.naturalWidth}×${img.naturalHeight}px)`;
+        console.log(`[PERF]     selectFolderImage total: ${(performance.now() - tLoad).toFixed(1)}ms`);
+        statusMessage.textContent = `Loaded ${folderImages[index].name} (${bitmap.width}×${bitmap.height}px)`;
         statusMessage.className = 'status success';
-    };
-    img.src = url;
+
+        // Prefetch next image
+        const nextIdx = getNextImageIndex(index, folderImages.length);
+        if (nextIdx !== index) {
+            prefetchNextImage(nextIdx);
+        }
+    } catch (err) {
+        console.error('[BUG-DEBUG] Error in selectFolderImage:', err);
+        hideLoading();
+        statusMessage.textContent = `Error loading image: ${err.message}`;
+        statusMessage.className = 'status error';
+    }
 }
 
 async function handleSaveToOut() {
     try {
+        const t0 = performance.now();
         const filename = deriveOutputFilename(folderImages[currentFolderImageIndex].name);
+        console.log(`[PERF]   3a. Saving ${filename} (canvas: ${sourceCanvas.width}×${sourceCanvas.height})...`);
         await saveToOut(folderHandle, filename, sourceCanvas);
+        console.log(`[PERF]   3b. Save to out/ done: ${(performance.now() - t0).toFixed(1)}ms`);
         statusMessage.textContent = `Saved ${filename} to out/`;
         statusMessage.className = 'status success';
         if (saveToOutBtn) saveToOutBtn.disabled = true;
 
         // Auto-advance to next image
+        const t1 = performance.now();
         const nextIndex = getNextImageIndex(currentFolderImageIndex, folderImages.length);
+        console.log(`[PERF]   4. Loading next image (index ${nextIndex})...`);
         await selectFolderImage(nextIndex);
+        console.log(`[PERF]   4b. Next image ready: ${(performance.now() - t1).toFixed(1)}ms`);
     } catch (e) {
         statusMessage.textContent = `Save failed: ${e.message}`;
         statusMessage.className = 'status error';

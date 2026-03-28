@@ -59,6 +59,15 @@ const { width, height } = rect;
     const H = computeHomography(cornerPts, dstCorners);
     const H_inv = invertHomography(H);
 
+    // Precompute constraint corrections (constant across all pixels)
+    if (edgeConstraints) {
+        for (const constraint of edgeConstraints) {
+            const mapped = applyHomography(constraint.src.x, constraint.src.y, H);
+            constraint._corrX = constraint.dst.x - mapped.x;
+            constraint._corrY = constraint.dst.y - mapped.y;
+        }
+    }
+
     // Progress tracking
     const totalPixels = canvas.width * canvas.height;
     let processedPixels = 0;
@@ -76,14 +85,9 @@ const { width, height } = rect;
                 src = applyHomography(x, y, H_inv);
             }
             
-            // Sample with bilinear interpolation
-            const rgba = bilinearSample(srcImg, src.x, src.y);
-
+            // Sample with bilinear interpolation (direct buffer write, no allocation)
             const i = (y * canvas.width + x) * 4;
-            dstImg.data[i]     = rgba[0];
-            dstImg.data[i + 1] = rgba[1];
-            dstImg.data[i + 2] = rgba[2];
-            dstImg.data[i + 3] = 255;
+            bilinearSampleDirect(srcImg, src.x, src.y, dstImg.data, i);
 
             processedPixels++;
             if (processedPixels % 10000 === 0) {
@@ -437,13 +441,9 @@ function applyConstrainedMapping(x, y, H_inv, constraints, width, height) {
             // Inverse distance weighting
             const weight = 1 / (1 + (dist * dist) / 1000);
             
-            // Where homography would map the constraint source
-            const constraintMapped = applyHomography(constraint.src.x, constraint.src.y,
-                                                    invertHomography(H_inv));
-            
-            // Correction vector (how far off the homography is)
-            const corrX = constraint.dst.x - constraintMapped.x;
-            const corrY = constraint.dst.y - constraintMapped.y;
+            // Use precomputed correction vector
+            const corrX = constraint._corrX;
+            const corrY = constraint._corrY;
             
             correctionX += weight * corrX;
             correctionY += weight * corrY;
@@ -676,6 +676,48 @@ function bilinearSample(img, x, y) {
         Math.round(lerp(lerp(d[i11+2], d[i12+2], dx), lerp(d[i21+2], d[i22+2], dx), dy)),
         255
     ];
+}
+
+/**
+ * Bilinear interpolation writing directly to destination buffer (no allocation)
+ */
+function bilinearSampleDirect(img, x, y, dst, di) {
+    const w = img.width;
+    const h = img.height;
+
+    if (x < 0 || x >= w || y < 0 || y >= h) {
+        dst[di] = 255; dst[di+1] = 255; dst[di+2] = 255; dst[di+3] = 255;
+        return;
+    }
+
+    x = Math.max(0, Math.min(w - 1.001, x));
+    y = Math.max(0, Math.min(h - 1.001, y));
+
+    const x1 = Math.floor(x);
+    const y1 = Math.floor(y);
+    const x2 = Math.min(x1 + 1, w - 1);
+    const y2 = Math.min(y1 + 1, h - 1);
+
+    const dx = x - x1;
+    const dy = y - y1;
+
+    const d = img.data;
+    const i11 = (y1 * w + x1) * 4;
+    const i12 = (y1 * w + x2) * 4;
+    const i21 = (y2 * w + x1) * 4;
+    const i22 = (y2 * w + x2) * 4;
+
+    const oneMinusDx = 1 - dx;
+    const oneMinusDy = 1 - dy;
+    const w11 = oneMinusDx * oneMinusDy;
+    const w12 = dx * oneMinusDy;
+    const w21 = oneMinusDx * dy;
+    const w22 = dx * dy;
+
+    dst[di]   = (d[i11] * w11 + d[i12] * w12 + d[i21] * w21 + d[i22] * w22 + 0.5) | 0;
+    dst[di+1] = (d[i11+1] * w11 + d[i12+1] * w12 + d[i21+1] * w21 + d[i22+1] * w22 + 0.5) | 0;
+    dst[di+2] = (d[i11+2] * w11 + d[i12+2] * w12 + d[i21+2] * w21 + d[i22+2] * w22 + 0.5) | 0;
+    dst[di+3] = 255;
 }
 
 /**

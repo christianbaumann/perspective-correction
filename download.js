@@ -28,19 +28,20 @@ export function downloadCorrectedImage({
         // Draw the corrected image
         exportCtx.drawImage(sourceCanvas, 0, 0);
 
-        // Generate high-quality PNG
-        const dataURL = exportCanvas.toDataURL("image/png", 1.0);
-        
-        // Create and trigger download
-        const link = document.createElement("a");
+        // Generate high-quality PNG asynchronously
         const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-        link.download = `corrected-document-${timestamp}.png`;
-        link.href = dataURL;
-        
-        // Trigger download
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const filename = `corrected-document-${timestamp}.png`;
+
+        exportCanvas.toBlob((blob) => {
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.download = filename;
+            link.href = url;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }, "image/png");
 
         statusMessage.textContent = `Image downloaded successfully! (${exportCanvas.width}×${exportCanvas.height}px)`;
         statusMessage.className = "status success";
