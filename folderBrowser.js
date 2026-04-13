@@ -50,7 +50,7 @@ export async function saveToOut(dirHandle, filename, canvas) {
     if (entry.kind === 'file') existing.add(entry.name);
   }
 
-  // Collision: rename existing file before writing the new one
+  // Collision-safe: if filename already exists, rename existing to _0 and write new as _1, etc.
   if (existing.has(filename)) {
     const base = filename.slice(0, filename.lastIndexOf('.'));
     const escapedBase = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -60,14 +60,20 @@ export async function saveToOut(dirHandle, filename, canvas) {
       const m = suffixRe.exec(name);
       if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
     }
-    const renamedFilename = `${base}_${maxN + 1}.png`;
-    const existingHandle = await outDir.getFileHandle(filename);
-    const existingFile = await existingHandle.getFile();
-    const renamedHandle = await outDir.getFileHandle(renamedFilename, { create: true });
-    const renamedWritable = await renamedHandle.createWritable();
-    await renamedWritable.write(existingFile);
-    await renamedWritable.close();
-    await outDir.removeEntry(filename);
+    // First collision: rename the original to _0, new file becomes _1
+    // Subsequent collisions: just increment
+    if (maxN < 0) {
+      const renamedFilename = `${base}_0.png`;
+      const existingHandle = await outDir.getFileHandle(filename);
+      const existingFile = await existingHandle.getFile();
+      const renamedHandle = await outDir.getFileHandle(renamedFilename, { create: true });
+      const renamedWritable = await renamedHandle.createWritable();
+      await renamedWritable.write(existingFile);
+      await renamedWritable.close();
+      await outDir.removeEntry(filename);
+      maxN = 0;
+    }
+    filename = `${base}_${maxN + 1}.png`;
   }
 
   const fileHandle = await outDir.getFileHandle(filename, { create: true });

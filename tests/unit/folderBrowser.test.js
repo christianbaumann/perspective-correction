@@ -216,10 +216,10 @@ describe('saveToOut()', () => {
     expect(dirHandle._outDirHandle.removeEntry).toHaveBeenCalledWith('scan001.png');
   });
 
-  it('collision: new file written under original filename', async () => {
+  it('collision: new file written under incremented filename', async () => {
     const dirHandle = makeMockDirHandle('scans', [], [{ name: 'scan001.png' }]);
     await saveToOut(dirHandle, 'scan001.png', mockCanvas);
-    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001.png', { create: true });
+    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_1.png', { create: true });
   });
 
   it('no collision: unrelated files in out/ — no rename', async () => {

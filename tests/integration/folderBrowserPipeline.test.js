@@ -58,6 +58,6 @@ describe('open → load → save pipeline', () => {
     const od = dh._outDirHandle;
     expect(od.removeEntry).toHaveBeenCalledWith('doc.png');
     expect(od.getFileHandle).toHaveBeenCalledWith('doc_0.png', { create: true });
-    expect(od.getFileHandle).toHaveBeenCalledWith('doc.png', { create: true });
+    expect(od.getFileHandle).toHaveBeenCalledWith('doc_1.png', { create: true });
   });
 });
