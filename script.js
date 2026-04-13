@@ -878,10 +878,11 @@ function applySimplePerspective(orderedPoints) {
             const destWidth = Math.max(10, Math.round(maxX - minX));
             const destHeight = Math.max(10, Math.round(maxY - minY));
 
+            const imageData = sourceCtx.getImageData(0, 0, sourceCtx.canvas.width, sourceCtx.canvas.height);
             const result = applyWebGLPerspective(sourceCanvas, orderedPoints, destWidth, destHeight);
 
-            // Draw result onto sourceCanvas (same as JS path)
-            sourceCtx.clearRect(0, 0, sourceCtx.canvas.width, sourceCtx.canvas.height);
+            // Display: restore original image, then overlay corrected region
+            sourceCtx.putImageData(imageData, 0, 0);
             sourceCtx.drawImage(result.canvas, minX, minY, destWidth, destHeight);
 
             pointsCanvas.style.pointerEvents = 'none';
@@ -1024,8 +1025,9 @@ async function handleSaveToOut() {
     try {
         const t0 = performance.now();
         const filename = deriveOutputFilename(folderImages[currentFolderImageIndex].name);
-        console.log(`[PERF]   3a. Saving ${filename} (canvas: ${sourceCanvas.width}×${sourceCanvas.height})...`);
-        await saveToOut(folderHandle, filename, sourceCanvas);
+        const saveCanvas = transformedImageData.canvas;
+        console.log(`[PERF]   3a. Saving ${filename} (canvas: ${saveCanvas.width}×${saveCanvas.height})...`);
+        await saveToOut(folderHandle, filename, saveCanvas);
         console.log(`[PERF]   3b. Save to out/ done: ${(performance.now() - t0).toFixed(1)}ms`);
         statusMessage.textContent = `Saved ${filename} to out/`;
         statusMessage.className = 'status success';

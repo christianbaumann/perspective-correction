@@ -23,16 +23,22 @@ const FIXTURE_PATH = '/tests/fixtures/perf-images';
 
 async function mockFSWithRealImages(page, { imageNames = IMAGE_NAMES } = {}) {
   await page.addInitScript(({ imageNames, FIXTURE_PATH }) => {
-    const makeWritable = () => ({
-      write: async () => {},
-      close: async () => {},
-    });
+    const outFiles = new Map();
+    const makeWritable = () => ({ write: async () => {}, close: async () => {} });
     const outDir = {
       kind: 'directory', name: 'out',
-      getFileHandle: async (name) => ({
-        kind: 'file', name,
-        createWritable: async () => makeWritable(),
-      }),
+      values: async function* () { yield* outFiles.values(); },
+      getFileHandle: async (name, opts) => {
+        if (!opts?.create && outFiles.has(name)) return outFiles.get(name);
+        const h = {
+          kind: 'file', name,
+          createWritable: async () => makeWritable(),
+          getFile: async () => new File(['data'], name, { type: 'image/png' }),
+        };
+        if (opts?.create) outFiles.set(name, h);
+        return h;
+      },
+      removeEntry: async (name) => { outFiles.delete(name); },
     };
 
     const fileHandles = imageNames.map((name) => ({
@@ -132,18 +138,17 @@ test.describe('Image Loading Performance Benchmark (real 2268×4032 PNGs)', () =
 
     await page.waitForTimeout(5000);
 
-    // --- 4. Save → auto-advance ---
+    // --- 4. Save (no auto-advance) ---
     const canvas = page.locator('#pointsCanvas');
     const box = await canvas.boundingBox();
     for (const [x, y] of [[0.1,0.1],[0.9,0.1],[0.9,0.9],[0.1,0.9]]) {
       await canvas.click({ position: { x: box.width * x, y: box.height * y } });
     }
     await page.click('#transformBtn');
-    // Auto-advance wraps from img_004 (index 3) → img_001 (index 0)
-    // But prefetch would have targeted index 0 (next after 3 in 4-image folder)
-    await expect(page.locator('#statusMessage')).toContainText('img_001.png', { timeout: 60000 });
-    const r4 = printPerfSummary('4. SAVE → AUTO-ADVANCE → img_001 (wrap-around)', perfLogs.splice(0));
-    results.push({ scenario: 'Save + auto-advance', ...r4 });
+    // Saves to out/ and stays on img_004
+    await expect(page.locator('#statusMessage')).toContainText('Saved', { timeout: 60000 });
+    const r4 = printPerfSummary('4. SAVE → stays on img_004', perfLogs.splice(0));
+    results.push({ scenario: 'Save (no advance)', ...r4 });
 
     // --- Summary table ---
     console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
