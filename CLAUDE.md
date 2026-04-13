@@ -47,7 +47,7 @@ Key coordinate concept: `sourceCanvas` and `gridCanvas` render at **original ima
 
 ### Module Responsibilities
 
-- **`script.js`** — main entry point. Handles image upload, point interaction (add/move/delete modes), canvas setup, zoom preview, and orchestrates correction. Points render as crosshairs with a colored center dot (blue default, red when dragging). Keyboard: Enter → apply correction; ArrowRight/ArrowLeft → navigate folder images (with wrap). Imports all other modules.
+- **`script.js`** — main entry point. Handles image upload, point interaction (add/move/delete modes), canvas setup, zoom preview, and orchestrates correction. Points render as crosshairs with a colored center dot (blue default, red when dragging). Keyboard: Enter → apply correction; ArrowRight/ArrowLeft → navigate folder images (with wrap); Space → reset all points. Imports all other modules.
 - **`folderBrowser.js`** — folder browser panel: open a local folder via File System Access API, browse images, save corrected output to `out/` subfolder (collision-safe: renames existing file to `_0`, `_1`, … before overwriting). Chrome-only.
 - **`helpers.js`** — `orderPoints()`, `getCanvasCoordinates()`, `normalizePoints()`/`denormalizePoints()` for persisting points across images of different sizes.
 - **`perspectiveTransform.js`** — `PerspectiveTransform` class: computes an 8-parameter homography matrix from 4 src/dst point pairs via Gaussian elimination. Used by the simple (4-point) path.

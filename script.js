@@ -175,6 +175,9 @@ function init() {
         } else if (e.key === 'ArrowLeft' && folderHandle && folderImages.length > 0) {
             e.preventDefault();
             selectFolderImage(getPrevImageIndex(currentFolderImageIndex, folderImages.length));
+        } else if (e.key === ' ') {
+            e.preventDefault();
+            resetAllPoints();
         }
     });
 
@@ -945,6 +948,8 @@ function renderFolderImageList() {
         item.addEventListener('click', () => selectFolderImage(i));
         folderImageList.appendChild(item);
     });
+    const activeItem = folderImageList.querySelector('.folder-image-item.active');
+    if (activeItem) activeItem.scrollIntoView({ block: 'nearest' });
 }
 
 async function selectFolderImage(index) {
