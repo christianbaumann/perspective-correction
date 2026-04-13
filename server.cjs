@@ -34,7 +34,7 @@ const server = http.createServer((req, res) => {
 
       const ext = path.extname(filePath).toLowerCase();
       const type = mime[ext] || 'application/octet-stream';
-      res.writeHead(200, { 'Content-Type': type });
+      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
       const stream = fs.createReadStream(filePath);
       stream.pipe(res);
       stream.on('error', () => {

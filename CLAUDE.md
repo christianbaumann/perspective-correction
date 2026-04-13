@@ -57,8 +57,9 @@ Key coordinate concept: `sourceCanvas` and `gridCanvas` render at **original ima
 - **`imageInterpolation.js`** — `getBilinearPixel()` utility for sub-pixel sampling.
 - **`download.js`** — exports corrected image as PNG via a temporary canvas and data URL download link.
 - **`printCorrectedDocument.js`** — opens a print window with the corrected image and auto-triggers the print dialog.
+- **`sessionPersistence.js`** — saves/restores folder browser session across page reloads. Stores `FileSystemDirectoryHandle` in IndexedDB (structured-cloneable), image index + normalized points in localStorage. On reload, re-requests permission and re-scans folder.
 - **`seo-loader.js`** — IIFE that injects SEO content sections (FAQ, features, keywords) into the DOM after page load.
-- **`server.cjs`** — minimal Node.js static file server (CommonJS, no dependencies).
+- **`server.cjs`** — minimal Node.js static file server (CommonJS, no dependencies). Sends `Cache-Control: no-cache` on all responses.
 
 ### Correction Pipeline
 
@@ -73,6 +74,7 @@ Key coordinate concept: `sourceCanvas` and `gridCanvas` render at **original ima
 2. Click image (or ArrowLeft/ArrowRight) → loads into editor with persisted points (if any)
 3. Apply correction → saves to `out/` subfolder (always `_0`, `_1`, …) → stays on current image
 4. Points are normalized (0–1) and re-applied to each new image
+5. Session (folder handle, image index, points) persists across page reloads via IndexedDB + localStorage
 
 ### Grid Overlay
 

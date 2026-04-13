@@ -6,7 +6,8 @@ import { applySimplePerspective as applySimple} from './simplePerspectiveApply.j
 import { applyComplexPerspective as applyComplex} from './complexPerspectiveApply.js';
 import { isWebGLSupported, applyWebGLPerspective } from './webglPerspective.js';
 import { printCorrectedDocument } from './printCorrectedDocument.js';
-import { isSupported, openFolder, loadImageFile, saveToOut, getNextImageIndex, getPrevImageIndex, deriveOutputFilename } from './folderBrowser.js';
+import { isSupported, openFolder, scanFolder, loadImageFile, saveToOut, getNextImageIndex, getPrevImageIndex, deriveOutputFilename } from './folderBrowser.js';
+import { saveSession, restoreSession } from './sessionPersistence.js';
 
 // DOM Elements
 const imageInput = document.getElementById('imageInput');
@@ -193,6 +194,23 @@ function init() {
         folderBrowserGroup.style.display = '';
         openFolderBtn.addEventListener('click', handleOpenFolder);
         saveToOutBtn.addEventListener('click', handleSaveToOut);
+
+        // Restore previous folder session
+        restoreSession().then(async (session) => {
+            if (!session) return;
+            try {
+                folderHandle = session.dirHandle;
+                folderImages = await scanFolder(folderHandle);
+                if (folderImages.length === 0) return;
+                folderPath.textContent = `\u{1F4C2} ${folderHandle.name}`;
+                savedNormalizedPoints = session.normalizedPoints;
+                const idx = Math.min(session.imageIndex, folderImages.length - 1);
+                renderFolderImageList();
+                selectFolderImage(idx);
+            } catch (e) {
+                console.warn('Session restore failed:', e);
+            }
+        });
     }
 
     loadSampleImage();
@@ -854,6 +872,7 @@ function applyPerspectiveCorrection() {
         // In folder-browser mode: save normalized points and auto-save/advance
         if (folderHandle && currentFolderImageIndex >= 0) {
             savedNormalizedPoints = normalizePoints(points, sourceCanvas.width, sourceCanvas.height);
+            saveSession(folderHandle, currentFolderImageIndex, savedNormalizedPoints);
             console.log(`[PERF]   3. Starting save+advance (async)...`);
             handleSaveToOut().then(() => {
                 console.log(`[PERF] ─── Pipeline total: ${(performance.now() - tPipeline).toFixed(1)}ms ───`);
@@ -928,6 +947,7 @@ async function handleOpenFolder() {
         if (folderImages.length > 0) {
             selectFolderImage(0);
         }
+        saveSession(folderHandle, 0, savedNormalizedPoints);
     } catch (e) {
         if (e.name !== 'AbortError') {
             statusMessage.textContent = `Error opening folder: ${e.message}`;
@@ -956,6 +976,7 @@ async function selectFolderImage(index) {
     currentFolderImageIndex = index;
     if (saveToOutBtn) saveToOutBtn.disabled = true;
     renderFolderImageList();
+    if (folderHandle) saveSession(folderHandle, index, savedNormalizedPoints);
 
     showLoading();
     const tLoad = performance.now();
@@ -1032,9 +1053,9 @@ async function handleSaveToOut() {
         const filename = deriveOutputFilename(folderImages[currentFolderImageIndex].name);
         const saveCanvas = transformedImageData.canvas;
         console.log(`[PERF]   3a. Saving ${filename} (canvas: ${saveCanvas.width}×${saveCanvas.height})...`);
-        await saveToOut(folderHandle, filename, saveCanvas);
+        const savedName = await saveToOut(folderHandle, filename, saveCanvas);
         console.log(`[PERF]   3b. Save to out/ done: ${(performance.now() - t0).toFixed(1)}ms`);
-        statusMessage.textContent = `Saved ${filename} to out/`;
+        statusMessage.textContent = `Saved ${savedName} to out/`;
         statusMessage.className = 'status success';
         if (saveToOutBtn) saveToOutBtn.disabled = true;
     } catch (e) {

@@ -9,13 +9,10 @@ export function isSupported() {
 }
 
 /**
- * Prompts the user to pick a folder.
- * Returns { dirHandle, imageFiles: Array<{name, handle}> }.
- * imageFiles is sorted alphabetically.
- * Throws if user cancels (AbortError).
+ * Scans a directory handle for image files.
+ * Returns sorted array of { name, handle }.
  */
-export async function openFolder() {
-  const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+export async function scanFolder(dirHandle) {
   const imageFiles = [];
   for await (const entry of dirHandle.values()) {
     if (entry.kind !== 'file') continue;
@@ -25,6 +22,18 @@ export async function openFolder() {
     }
   }
   imageFiles.sort((a, b) => a.name.localeCompare(b.name));
+  return imageFiles;
+}
+
+/**
+ * Prompts the user to pick a folder.
+ * Returns { dirHandle, imageFiles: Array<{name, handle}> }.
+ * imageFiles is sorted alphabetically.
+ * Throws if user cancels (AbortError).
+ */
+export async function openFolder() {
+  const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+  const imageFiles = await scanFolder(dirHandle);
   return { dirHandle, imageFiles };
 }
 
@@ -64,7 +73,7 @@ export async function saveToOut(dirHandle, filename, canvas) {
   const fileHandle = await outDir.getFileHandle(filename, { create: true });
   const writable = await fileHandle.createWritable();
   console.log(`[PERF]       saveToOut: FS handles ready: ${(performance.now() - t0).toFixed(1)}ms`);
-  await new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const tBlob = performance.now();
     canvas.toBlob(async (blob) => {
       if (!blob) { reject(new Error('toBlob returned null')); return; }
@@ -74,7 +83,7 @@ export async function saveToOut(dirHandle, filename, canvas) {
         await writable.write(blob);
         await writable.close();
         console.log(`[PERF]       saveToOut: file write+close: ${(performance.now() - tWrite).toFixed(1)}ms`);
-        resolve();
+        resolve(filename);
       } catch (e) { reject(e); }
     }, 'image/png', 1.0);
   });

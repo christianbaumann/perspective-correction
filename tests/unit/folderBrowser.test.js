@@ -210,7 +210,7 @@ describe('saveToOut()', () => {
 
   it('base name with regex-special chars — no throw', async () => {
     const dirHandle = makeMockDirHandle('scans', [], [{ name: 'scan(001).png' }]);
-    await expect(saveToOut(dirHandle, 'scan(001).png', mockCanvas)).resolves.toBeUndefined();
+    await expect(saveToOut(dirHandle, 'scan(001).png', mockCanvas)).resolves.toBe('scan(001)_0.png');
   });
 });
 
