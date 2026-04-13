@@ -50,20 +50,21 @@ export async function saveToOut(dirHandle, filename, canvas) {
     if (entry.kind === 'file') existing.add(entry.name);
   }
 
-  // Collision-safe: if filename already exists, rename existing to _0 and write new as _1, etc.
-  if (existing.has(filename)) {
-    const base = filename.slice(0, filename.lastIndexOf('.'));
-    const escapedBase = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const suffixRe = new RegExp(`^${escapedBase}_([0-9]+)\\.png$`);
-    let maxN = -1;
-    for (const name of existing) {
-      const m = suffixRe.exec(name);
-      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
-    }
-    // First collision: rename the original to _0, new file becomes _1
-    // Subsequent collisions: just increment
-    if (maxN < 0) {
-      const renamedFilename = `${base}_0.png`;
+  // Collision-safe: always use numbered suffix when any version already exists
+  const base = filename.slice(0, filename.lastIndexOf('.'));
+  const escapedBase = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const suffixRe = new RegExp(`^${escapedBase}_([0-9]+)\\.png$`);
+  let maxN = -1;
+  for (const name of existing) {
+    const m = suffixRe.exec(name);
+    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+  }
+  const hasAnyVersion = existing.has(filename) || maxN >= 0;
+  if (hasAnyVersion) {
+    // First collision: rename the bare file to _0
+    if (existing.has(filename)) {
+      if (maxN < 0) maxN = -1;
+      const renamedFilename = `${base}_${maxN + 1}.png`;
       const existingHandle = await outDir.getFileHandle(filename);
       const existingFile = await existingHandle.getFile();
       const renamedHandle = await outDir.getFileHandle(renamedFilename, { create: true });
@@ -71,7 +72,7 @@ export async function saveToOut(dirHandle, filename, canvas) {
       await renamedWritable.write(existingFile);
       await renamedWritable.close();
       await outDir.removeEntry(filename);
-      maxN = 0;
+      maxN = maxN + 1;
     }
     filename = `${base}_${maxN + 1}.png`;
   }
