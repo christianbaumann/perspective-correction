@@ -85,7 +85,7 @@ export function applySimplePerspective(orderedPoints, { sourceCtx, pointsCanvas,
         orderedPoints: orderedPoints
     };
 
-    sourceCtx.clearRect(0, 0, sourceCtx.canvas.width, sourceCtx.canvas.height);
+    sourceCtx.putImageData(imageData, 0, 0);
     sourceCtx.drawImage(tempCanvas, minX, minY, destWidth, destHeight);
 
     pointsCanvas.style.pointerEvents = 'none';

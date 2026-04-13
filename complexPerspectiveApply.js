@@ -102,9 +102,11 @@ const { width, height } = rect;
     // Optional: Apply mild sharpening for text clarity
     applySharpen(ctx, canvas.width, canvas.height);
 
-    // Display result
-    sourceCtx.clearRect(0, 0, sourceCtx.canvas.width, sourceCtx.canvas.height);
-    sourceCtx.drawImage(canvas, 0, 0);
+    // Display result: restore original, then overlay corrected region at bounding-box position
+    const minX = Math.min(...cornerPts.map(p => p.x));
+    const minY = Math.min(...cornerPts.map(p => p.y));
+    sourceCtx.putImageData(srcImg, 0, 0);
+    sourceCtx.drawImage(canvas, minX, minY);
 
     pointsCanvas.style.pointerEvents = 'none';
     downloadBtn.disabled = false;
