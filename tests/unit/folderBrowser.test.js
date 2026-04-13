@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   isSupported, openFolder, loadImageFile, saveToOut,
-  getNextImageIndex, deriveOutputFilename
+  getNextImageIndex, getPrevImageIndex, deriveOutputFilename
 } from '../../folderBrowser.js';
 import {
   makeMockFileHandle, makeMockDirHandle, makeMockWritable
@@ -175,6 +175,63 @@ describe('saveToOut()', () => {
     dirHandle._outFileHandle.createWritable.mockRejectedValue(new Error('locked'));
     await expect(saveToOut(dirHandle, 'out.png', mockCanvas)).rejects.toThrow('locked');
   });
+
+  // Collision cases
+  it('no collision: does not call removeEntry when out/ is empty', async () => {
+    const dirHandle = makeMockDirHandle('scans', [], []);
+    await saveToOut(dirHandle, 'scan001.png', mockCanvas);
+    expect(dirHandle._outDirHandle.removeEntry).not.toHaveBeenCalled();
+  });
+
+  it('collision: renames existing to _0 when no suffix exists', async () => {
+    const dirHandle = makeMockDirHandle('scans', [], [{ name: 'scan001.png' }]);
+    await saveToOut(dirHandle, 'scan001.png', mockCanvas);
+    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_0.png', { create: true });
+  });
+
+  it('collision: renames existing to _1 when _0 already exists', async () => {
+    const dirHandle = makeMockDirHandle('scans', [], [
+      { name: 'scan001.png' },
+      { name: 'scan001_0.png' },
+    ]);
+    await saveToOut(dirHandle, 'scan001.png', mockCanvas);
+    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_1.png', { create: true });
+  });
+
+  it('collision: _0…_3 present → renames to _4', async () => {
+    const dirHandle = makeMockDirHandle('scans', [], [
+      { name: 'scan001.png' },
+      { name: 'scan001_0.png' },
+      { name: 'scan001_1.png' },
+      { name: 'scan001_2.png' },
+      { name: 'scan001_3.png' },
+    ]);
+    await saveToOut(dirHandle, 'scan001.png', mockCanvas);
+    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_4.png', { create: true });
+  });
+
+  it('collision: removeEntry called with original filename', async () => {
+    const dirHandle = makeMockDirHandle('scans', [], [{ name: 'scan001.png' }]);
+    await saveToOut(dirHandle, 'scan001.png', mockCanvas);
+    expect(dirHandle._outDirHandle.removeEntry).toHaveBeenCalledWith('scan001.png');
+  });
+
+  it('collision: new file written under original filename', async () => {
+    const dirHandle = makeMockDirHandle('scans', [], [{ name: 'scan001.png' }]);
+    await saveToOut(dirHandle, 'scan001.png', mockCanvas);
+    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001.png', { create: true });
+  });
+
+  it('no collision: unrelated files in out/ — no rename', async () => {
+    const dirHandle = makeMockDirHandle('scans', [], [{ name: 'other.png' }]);
+    await saveToOut(dirHandle, 'scan001.png', mockCanvas);
+    expect(dirHandle._outDirHandle.removeEntry).not.toHaveBeenCalled();
+  });
+
+  it('base name with regex-special chars — no throw', async () => {
+    const dirHandle = makeMockDirHandle('scans', [], [{ name: 'scan(001).png' }]);
+    await expect(saveToOut(dirHandle, 'scan(001).png', mockCanvas)).resolves.toBeUndefined();
+  });
 });
 
 // ─── getNextImageIndex ────────────────────────────────────────────────────────
@@ -203,6 +260,23 @@ describe('getNextImageIndex()', () => {
   it('handles large index correctly', () => {
     expect(getNextImageIndex(99, 100)).toBe(0);
   });
+});
+
+// ─── getPrevImageIndex ────────────────────────────────────────────────────────
+
+describe('getPrevImageIndex()', () => {
+  it('returns 0 when current is 1 and total is 3', () =>
+    expect(getPrevImageIndex(1, 3)).toBe(0));
+  it('wraps: first index returns last', () =>
+    expect(getPrevImageIndex(0, 3)).toBe(2));
+  it('mid-list step', () =>
+    expect(getPrevImageIndex(2, 3)).toBe(1));
+  it('returns -1 when total is 0', () =>
+    expect(getPrevImageIndex(0, 0)).toBe(-1));
+  it('single image wraps to itself', () =>
+    expect(getPrevImageIndex(0, 1)).toBe(0));
+  it('handles large index', () =>
+    expect(getPrevImageIndex(99, 100)).toBe(98));
 });
 
 // ─── deriveOutputFilename ─────────────────────────────────────────────────────

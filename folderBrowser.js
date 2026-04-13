@@ -43,6 +43,33 @@ export async function loadImageFile(fileHandle) {
 export async function saveToOut(dirHandle, filename, canvas) {
   const t0 = performance.now();
   const outDir = await dirHandle.getDirectoryHandle('out', { create: true });
+
+  // Collect existing filenames in out/
+  const existing = new Set();
+  for await (const entry of outDir.values()) {
+    if (entry.kind === 'file') existing.add(entry.name);
+  }
+
+  // Collision: rename existing file before writing the new one
+  if (existing.has(filename)) {
+    const base = filename.slice(0, filename.lastIndexOf('.'));
+    const escapedBase = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const suffixRe = new RegExp(`^${escapedBase}_([0-9]+)\\.png$`);
+    let maxN = -1;
+    for (const name of existing) {
+      const m = suffixRe.exec(name);
+      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+    }
+    const renamedFilename = `${base}_${maxN + 1}.png`;
+    const existingHandle = await outDir.getFileHandle(filename);
+    const existingFile = await existingHandle.getFile();
+    const renamedHandle = await outDir.getFileHandle(renamedFilename, { create: true });
+    const renamedWritable = await renamedHandle.createWritable();
+    await renamedWritable.write(existingFile);
+    await renamedWritable.close();
+    await outDir.removeEntry(filename);
+  }
+
   const fileHandle = await outDir.getFileHandle(filename, { create: true });
   const writable = await fileHandle.createWritable();
   console.log(`[PERF]       saveToOut: FS handles ready: ${(performance.now() - t0).toFixed(1)}ms`);
@@ -70,6 +97,16 @@ export async function saveToOut(dirHandle, filename, canvas) {
 export function getNextImageIndex(currentIndex, total) {
   if (total === 0) return -1;
   return (currentIndex + 1) % total;
+}
+
+/**
+ * Returns the index of the previous image.
+ * Wraps around: before the first image returns the last.
+ * Returns -1 if total is 0.
+ */
+export function getPrevImageIndex(currentIndex, total) {
+  if (total === 0) return -1;
+  return (currentIndex - 1 + total) % total;
 }
 
 /**

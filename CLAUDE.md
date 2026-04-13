@@ -27,6 +27,13 @@ npx playwright test      # e2e tests (Chromium)
 
 - Update README.md and CLAUDE.md after every change as appropriate; always be brief and crisp
 - After every change, commit with brief & crisp but speaking commit message
+- After each push: scan for anything new (new page layout, new content type, new pattern, new edge case, etc.) that would require an update to the workflow, CLAUDE.md, gold standards, or test coverage. If found, tell the user with a brief one-liner: what changed and what to do about it. Update CLAUDE.md accordingly.
+
+## Agent / Subagent Limitations
+
+**Subagents (background agents) cannot prompt the user for tool permissions.** They inherit only already-approved permissions from the parent session. If Bash (or any other tool) is not pre-approved, subagents will fail silently with a permission error. Workarounds:
+- Pre-approve required tools (e.g. Bash) before launching subagents, or
+- Run the work directly in the main conversation instead of delegating to background agents.
 
 ## Architecture
 
@@ -40,8 +47,8 @@ Key coordinate concept: `sourceCanvas` and `gridCanvas` render at **original ima
 
 ### Module Responsibilities
 
-- **`script.js`** — main entry point. Handles image upload, point interaction (add/move/delete modes), canvas setup, zoom preview, and orchestrates correction. Points render as crosshairs with a colored center dot (blue default, red when dragging). Imports all other modules.
-- **`folderBrowser.js`** — folder browser panel: open a local folder via File System Access API, browse images, save corrected output to `out/` subfolder, auto-advance to next image. Chrome-only.
+- **`script.js`** — main entry point. Handles image upload, point interaction (add/move/delete modes), canvas setup, zoom preview, and orchestrates correction. Points render as crosshairs with a colored center dot (blue default, red when dragging). Keyboard: Enter → apply correction; ArrowRight/ArrowLeft → navigate folder images (with wrap). Imports all other modules.
+- **`folderBrowser.js`** — folder browser panel: open a local folder via File System Access API, browse images, save corrected output to `out/` subfolder (collision-safe: renames existing file to `_0`, `_1`, … before overwriting). Chrome-only.
 - **`helpers.js`** — `orderPoints()`, `getCanvasCoordinates()`, `normalizePoints()`/`denormalizePoints()` for persisting points across images of different sizes.
 - **`perspectiveTransform.js`** — `PerspectiveTransform` class: computes an 8-parameter homography matrix from 4 src/dst point pairs via Gaussian elimination. Used by the simple (4-point) path.
 - **`simplePerspectiveApply.js`** — 4-point correction using `PerspectiveTransform`. Inverse-maps each destination pixel to the source using the homography.
@@ -63,8 +70,8 @@ Key coordinate concept: `sourceCanvas` and `gridCanvas` render at **original ima
 ### Folder Browser Flow
 
 1. User opens a local folder → images listed in left panel
-2. Click image → loads into editor with persisted points (if any)
-3. Apply correction → save to `out/` subfolder → auto-advance to next image
+2. Click image (or ArrowLeft/ArrowRight) → loads into editor with persisted points (if any)
+3. Apply correction → saves to `out/` subfolder (collision-safe) → stays on current image
 4. Points are normalized (0–1) and re-applied to each new image
 
 ### Grid Overlay

@@ -6,7 +6,7 @@ import { applySimplePerspective as applySimple} from './simplePerspectiveApply.j
 import { applyComplexPerspective as applyComplex} from './complexPerspectiveApply.js';
 import { isWebGLSupported, applyWebGLPerspective } from './webglPerspective.js';
 import { printCorrectedDocument } from './printCorrectedDocument.js';
-import { isSupported, openFolder, loadImageFile, saveToOut, getNextImageIndex, deriveOutputFilename } from './folderBrowser.js';
+import { isSupported, openFolder, loadImageFile, saveToOut, getNextImageIndex, getPrevImageIndex, deriveOutputFilename } from './folderBrowser.js';
 
 // DOM Elements
 const imageInput = document.getElementById('imageInput');
@@ -163,11 +163,18 @@ function init() {
         canvas.addEventListener('mouseleave', handleCornerZoomMouseUp);
     }
 
-    // Enter key triggers "Apply correction"
+    // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.target.matches('input, textarea, select, button')) {
+        if (e.target.matches('input, textarea, select, button')) return;
+        if (e.key === 'Enter') {
             e.preventDefault();
             applyPerspectiveCorrection();
+        } else if (e.key === 'ArrowRight' && folderHandle && folderImages.length > 0) {
+            e.preventDefault();
+            selectFolderImage(getNextImageIndex(currentFolderImageIndex, folderImages.length));
+        } else if (e.key === 'ArrowLeft' && folderHandle && folderImages.length > 0) {
+            e.preventDefault();
+            selectFolderImage(getPrevImageIndex(currentFolderImageIndex, folderImages.length));
         }
     });
 
@@ -1023,13 +1030,6 @@ async function handleSaveToOut() {
         statusMessage.textContent = `Saved ${filename} to out/`;
         statusMessage.className = 'status success';
         if (saveToOutBtn) saveToOutBtn.disabled = true;
-
-        // Auto-advance to next image
-        const t1 = performance.now();
-        const nextIndex = getNextImageIndex(currentFolderImageIndex, folderImages.length);
-        console.log(`[PERF]   4. Loading next image (index ${nextIndex})...`);
-        await selectFolderImage(nextIndex);
-        console.log(`[PERF]   4b. Next image ready: ${(performance.now() - t1).toFixed(1)}ms`);
     } catch (e) {
         statusMessage.textContent = `Save failed: ${e.message}`;
         statusMessage.className = 'status error';

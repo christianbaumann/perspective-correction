@@ -21,22 +21,40 @@ export function makeMockWritable() {
   };
 }
 
-export function makeMockDirHandle(name = 'scans', entries = []) {
+export function makeMockDirHandle(name = 'scans', entries = [], outFiles = []) {
   const children = new Map(entries.map(e => [e.name, e]));
-  const outWritable = makeMockWritable();
 
-  const outFileHandle = {
-    kind: 'file',
-    name: 'out-file',
+  // Per-filename handles for existing out/ files (supports collision reads)
+  const outFileHandles = new Map(outFiles.map(f => {
+    const writable = makeMockWritable();
+    const handle = {
+      kind: 'file', name: f.name,
+      getFile: vi.fn().mockResolvedValue(
+        new File([f.content ?? 'existing-data'], f.name, { type: 'image/png' })
+      ),
+      createWritable: vi.fn().mockResolvedValue(writable),
+      _writable: writable,
+    };
+    return [f.name, handle];
+  }));
+
+  const outWritable = makeMockWritable();
+  const defaultOutFileHandle = {
+    kind: 'file', name: 'out-file',
     createWritable: vi.fn().mockResolvedValue(outWritable),
     _writable: outWritable,
   };
 
   const outDirHandle = {
-    kind: 'directory',
-    name: 'out',
-    getFileHandle: vi.fn().mockResolvedValue(outFileHandle),
-    _fileHandle: outFileHandle,
+    kind: 'directory', name: 'out',
+    values: vi.fn(async function* () { yield* outFileHandles.values(); }),
+    getFileHandle: vi.fn((fname, opts) => {
+      if (outFileHandles.has(fname) && !opts?.create)
+        return Promise.resolve(outFileHandles.get(fname));
+      return Promise.resolve(defaultOutFileHandle);
+    }),
+    removeEntry: vi.fn().mockResolvedValue(undefined),
+    _fileHandle: defaultOutFileHandle,
   };
 
   return {
@@ -45,7 +63,7 @@ export function makeMockDirHandle(name = 'scans', entries = []) {
     values: vi.fn(async function* () { yield* children.values(); }),
     getDirectoryHandle: vi.fn().mockResolvedValue(outDirHandle),
     _outDirHandle: outDirHandle,
-    _outFileHandle: outFileHandle,
+    _outFileHandle: defaultOutFileHandle,
     _outWritable: outWritable,
   };
 }

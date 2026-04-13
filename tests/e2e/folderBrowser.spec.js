@@ -2,16 +2,22 @@ import { test, expect } from '@playwright/test';
 
 async function mockFS(page, { dirName = 'test-folder', imageFiles = [] } = {}) {
   await page.addInitScript(({ dirName, imageFiles }) => {
-    const makeWritable = () => ({
-      write: async () => {},
-      close: async () => {},
-    });
+    const outFiles = new Map();
+    const makeWritable = () => ({ write: async () => {}, close: async () => {} });
     const outDir = {
       kind: 'directory', name: 'out',
-      getFileHandle: async (name) => ({
-        kind: 'file', name,
-        createWritable: async () => makeWritable(),
-      }),
+      values: async function* () { yield* outFiles.values(); },
+      getFileHandle: async (name, opts) => {
+        if (!opts?.create && outFiles.has(name)) return outFiles.get(name);
+        const h = {
+          kind: 'file', name,
+          createWritable: async () => makeWritable(),
+          getFile: async () => new File(['data'], name, { type: 'image/png' }),
+        };
+        if (opts?.create) outFiles.set(name, h);
+        return h;
+      },
+      removeEntry: async (name) => { outFiles.delete(name); },
     };
     const fileHandles = imageFiles.map(({ name }) => ({
       kind: 'file', name,
@@ -53,7 +59,7 @@ test('smoke: folder browser section visible and first image auto-loads into canv
   await expect(page.locator('#statusMessage')).toContainText('first.png', { timeout: 5000 });
 });
 
-test('correct → auto-save → auto-advance to next image', async ({ page }) => {
+test('correct → save → stays on current image', async ({ page }) => {
   await mockFS(page, {
     imageFiles: [
       { name: 'img1.jpg', b64: '' },
@@ -64,11 +70,11 @@ test('correct → auto-save → auto-advance to next image', async ({ page }) =>
   await page.click('#openFolderBtn');
   await expect(page.locator('#statusMessage')).toContainText('img1.jpg', { timeout: 5000 });
   await applyCorrection(page);
-  // Correction in folder mode auto-saves and auto-advances to next image
-  await expect(page.locator('.folder-image-item.active')).toContainText('img2.jpg', { timeout: 5000 });
+  await expect(page.locator('#statusMessage')).toContainText('Saved', { timeout: 5000 });
+  await expect(page.locator('.folder-image-item.active')).toContainText('img1.jpg', { timeout: 5000 });
 });
 
-test('wrap-around: correcting last image auto-advances to first image', async ({ page }) => {
+test('correct → save → stays on same image (no wrap)', async ({ page }) => {
   await mockFS(page, {
     imageFiles: [
       { name: 'a.png', b64: '' },
@@ -80,8 +86,8 @@ test('wrap-around: correcting last image auto-advances to first image', async ({
   await page.locator('.folder-image-item').nth(1).click();
   await expect(page.locator('#statusMessage')).toContainText('b.png', { timeout: 5000 });
   await applyCorrection(page);
-  // Auto-save + auto-advance wraps around to first image
-  await expect(page.locator('.folder-image-item.active')).toContainText('a.png', { timeout: 5000 });
+  await expect(page.locator('#statusMessage')).toContainText('Saved', { timeout: 5000 });
+  await expect(page.locator('.folder-image-item.active')).toContainText('b.png', { timeout: 5000 });
 });
 
 test('single-image folder: stays on same image after correction', async ({ page }) => {
@@ -120,7 +126,7 @@ test('save failure shows error in status (permission denied on getDirectoryHandl
   await expect(page.locator('#statusMessage')).toHaveClass(/error/);
 });
 
-test('correct → auto-advance → points restored on next image', async ({ page }) => {
+test('correct → save → points not cleared', async ({ page }) => {
   await mockFS(page, {
     imageFiles: [
       { name: 'img1.png', b64: '' },
@@ -131,9 +137,7 @@ test('correct → auto-advance → points restored on next image', async ({ page
   await page.click('#openFolderBtn');
   await expect(page.locator('#statusMessage')).toContainText('img1.png', { timeout: 5000 });
   await applyCorrection(page);
-  // In folder mode, applyPerspectiveCorrection auto-saves and auto-advances
-  await expect(page.locator('.folder-image-item.active')).toContainText('img2.png', { timeout: 5000 });
-  // Points should be restored on the new image
+  await expect(page.locator('.folder-image-item.active')).toContainText('img1.png', { timeout: 5000 });
   await expect(page.locator('#pointCount')).toHaveText('4', { timeout: 5000 });
 });
 
@@ -149,8 +153,11 @@ test('reset clears saved points — next image has no points', async ({ page }) 
   await page.click('#openFolderBtn');
   await expect(page.locator('#statusMessage')).toContainText('a.png', { timeout: 5000 });
   await applyCorrection(page);
-  // Auto-advances to b.png with points restored
-  await expect(page.locator('.folder-image-item.active')).toContainText('b.png', { timeout: 5000 });
+  // No auto-advance; stays on a.png with points
+  await expect(page.locator('.folder-image-item.active')).toContainText('a.png', { timeout: 5000 });
+  // Navigate to b.png manually; points should be restored
+  await page.locator('.folder-image-item').nth(1).click();
+  await expect(page.locator('#statusMessage')).toContainText('b.png', { timeout: 5000 });
   await expect(page.locator('#pointCount')).toHaveText('4', { timeout: 5000 });
   // Reset all points — should clear saved points too
   await page.click('#resetBtn');
@@ -159,6 +166,99 @@ test('reset clears saved points — next image has no points', async ({ page }) 
   await page.locator('.folder-image-item').nth(2).click();
   await expect(page.locator('#statusMessage')).toContainText('c.png', { timeout: 5000 });
   await expect(page.locator('#pointCount')).toHaveText('0');
+});
+
+test('ArrowRight navigates to next image', async ({ page }) => {
+  await mockFS(page, {
+    imageFiles: [
+      { name: 'a.png', b64: '' },
+      { name: 'b.png', b64: '' },
+      { name: 'c.png', b64: '' },
+    ],
+  });
+  await page.goto('/');
+  await page.click('#openFolderBtn');
+  await expect(page.locator('#statusMessage')).toContainText('a.png', { timeout: 5000 });
+  await page.click('#statusMessage'); // ensure no button has focus
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.folder-image-item.active')).toContainText('b.png', { timeout: 5000 });
+});
+
+test('ArrowRight wraps from last image to first', async ({ page }) => {
+  await mockFS(page, {
+    imageFiles: [
+      { name: 'a.png', b64: '' },
+      { name: 'b.png', b64: '' },
+      { name: 'c.png', b64: '' },
+    ],
+  });
+  await page.goto('/');
+  await page.click('#openFolderBtn');
+  await page.locator('.folder-image-item').nth(2).click();
+  await expect(page.locator('#statusMessage')).toContainText('c.png', { timeout: 5000 });
+  await page.click('#statusMessage');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.folder-image-item.active')).toContainText('a.png', { timeout: 5000 });
+});
+
+test('ArrowLeft navigates to previous image', async ({ page }) => {
+  await mockFS(page, {
+    imageFiles: [
+      { name: 'a.png', b64: '' },
+      { name: 'b.png', b64: '' },
+      { name: 'c.png', b64: '' },
+    ],
+  });
+  await page.goto('/');
+  await page.click('#openFolderBtn');
+  await page.locator('.folder-image-item').nth(1).click();
+  await expect(page.locator('#statusMessage')).toContainText('b.png', { timeout: 5000 });
+  await page.click('#statusMessage');
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('.folder-image-item.active')).toContainText('a.png', { timeout: 5000 });
+});
+
+test('ArrowLeft wraps from first image to last', async ({ page }) => {
+  await mockFS(page, {
+    imageFiles: [
+      { name: 'a.png', b64: '' },
+      { name: 'b.png', b64: '' },
+      { name: 'c.png', b64: '' },
+    ],
+  });
+  await page.goto('/');
+  await page.click('#openFolderBtn');
+  await expect(page.locator('#statusMessage')).toContainText('a.png', { timeout: 5000 });
+  await page.click('#statusMessage');
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('.folder-image-item.active')).toContainText('c.png', { timeout: 5000 });
+});
+
+test('Arrow keys do nothing when no folder is open', async ({ page }) => {
+  await mockFS(page);
+  await page.goto('/');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowLeft');
+  // No crash, no folder items visible
+  await expect(page.locator('.folder-image-item')).toHaveCount(0);
+});
+
+test('ArrowRight → points from previous image restored on new image', async ({ page }) => {
+  await mockFS(page, {
+    imageFiles: [
+      { name: 'img1.png', b64: '' },
+      { name: 'img2.png', b64: '' },
+    ],
+  });
+  await page.goto('/');
+  await page.click('#openFolderBtn');
+  await expect(page.locator('#statusMessage')).toContainText('img1.png', { timeout: 5000 });
+  await applyCorrection(page);
+  await expect(page.locator('.folder-image-item.active')).toContainText('img1.png', { timeout: 5000 });
+  await page.click('#statusMessage');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.folder-image-item.active')).toContainText('img2.png', { timeout: 5000 });
+  await expect(page.locator('#pointCount')).toHaveText('4', { timeout: 5000 });
 });
 
 test('regression: existing Upload Image drag-drop unaffected by folder browser', async ({ page }) => {

@@ -44,4 +44,20 @@ describe('open → load → save pipeline', () => {
     await saveToOut(dirHandle, 'test.png', canvas);
     expect(dirHandle.getDirectoryHandle).toHaveBeenCalledWith('out', { create: true });
   });
+
+  it('collision pipeline: existing file renamed, new file written as original name', async () => {
+    const dirHandle = makeMockDirHandle(
+      'scans', [makeMockFileHandle('doc.jpg')],
+      [{ name: 'doc.png', content: 'old-data' }]
+    );
+    window.showDirectoryPicker.mockResolvedValue(dirHandle);
+    const { dirHandle: dh } = await openFolder();
+    const canvas = { toBlob: vi.fn((cb) => cb(new Blob(['new-data']))) };
+    await saveToOut(dh, 'doc.png', canvas);
+
+    const od = dh._outDirHandle;
+    expect(od.removeEntry).toHaveBeenCalledWith('doc.png');
+    expect(od.getFileHandle).toHaveBeenCalledWith('doc_0.png', { create: true });
+    expect(od.getFileHandle).toHaveBeenCalledWith('doc.png', { create: true });
+  });
 });
