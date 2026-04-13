@@ -48,7 +48,7 @@ Key coordinate concept: `sourceCanvas` and `gridCanvas` render at **original ima
 ### Module Responsibilities
 
 - **`script.js`** — main entry point. Handles image upload, point interaction (add/move/delete modes), canvas setup, zoom preview, and orchestrates correction. Points render as crosshairs with a colored center dot (blue default, red when dragging). Keyboard: Enter → apply correction; ArrowRight/ArrowLeft → navigate folder images (with wrap); Space → reset all points. Imports all other modules.
-- **`folderBrowser.js`** — folder browser panel: open a local folder via File System Access API, browse images, save corrected output to `out/` subfolder (collision-safe: renames existing file to `_0`, `_1`, … before overwriting). Chrome-only.
+- **`folderBrowser.js`** — folder browser panel: open a local folder via File System Access API, browse images, save corrected output to `out/` subfolder (always numbered: `_0`, `_1`, `_2`, …). Chrome-only.
 - **`helpers.js`** — `orderPoints()`, `getCanvasCoordinates()`, `normalizePoints()`/`denormalizePoints()` for persisting points across images of different sizes.
 - **`perspectiveTransform.js`** — `PerspectiveTransform` class: computes an 8-parameter homography matrix from 4 src/dst point pairs via Gaussian elimination. Used by the simple (4-point) path.
 - **`simplePerspectiveApply.js`** — 4-point correction using `PerspectiveTransform`. Inverse-maps each destination pixel to the source using the homography.
@@ -71,7 +71,7 @@ Key coordinate concept: `sourceCanvas` and `gridCanvas` render at **original ima
 
 1. User opens a local folder → images listed in left panel
 2. Click image (or ArrowLeft/ArrowRight) → loads into editor with persisted points (if any)
-3. Apply correction → saves to `out/` subfolder (collision-safe) → stays on current image
+3. Apply correction → saves to `out/` subfolder (always `_0`, `_1`, …) → stays on current image
 4. Points are normalized (0–1) and re-applied to each new image
 
 ### Grid Overlay

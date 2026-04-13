@@ -135,12 +135,12 @@ describe('saveToOut()', () => {
     };
   });
 
-  it('creates out/ dir, creates file, writes blob, closes writable', async () => {
+  it('creates out/ dir, creates file with _0 suffix, writes blob, closes writable', async () => {
     const dirHandle = makeMockDirHandle('scans');
     await saveToOut(dirHandle, 'scan001.png', mockCanvas);
 
     expect(dirHandle.getDirectoryHandle).toHaveBeenCalledWith('out', { create: true });
-    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001.png', { create: true });
+    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_0.png', { create: true });
     expect(dirHandle._outWritable.write).toHaveBeenCalledTimes(1);
     expect(dirHandle._outWritable.close).toHaveBeenCalledTimes(1);
   });
@@ -176,32 +176,22 @@ describe('saveToOut()', () => {
     await expect(saveToOut(dirHandle, 'out.png', mockCanvas)).rejects.toThrow('locked');
   });
 
-  // Collision cases
-  it('no collision: does not call removeEntry when out/ is empty', async () => {
+  // Suffix numbering cases
+  it('empty out/: saves as _0', async () => {
     const dirHandle = makeMockDirHandle('scans', [], []);
     await saveToOut(dirHandle, 'scan001.png', mockCanvas);
+    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_0.png', { create: true });
     expect(dirHandle._outDirHandle.removeEntry).not.toHaveBeenCalled();
   });
 
-  it('collision: renames existing to _0 when no suffix exists', async () => {
-    const dirHandle = makeMockDirHandle('scans', [], [{ name: 'scan001.png' }]);
-    await saveToOut(dirHandle, 'scan001.png', mockCanvas);
-    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_0.png', { create: true });
-  });
-
-  it('collision: renames existing to _1 when _0 already exists, writes _2', async () => {
-    const dirHandle = makeMockDirHandle('scans', [], [
-      { name: 'scan001.png' },
-      { name: 'scan001_0.png' },
-    ]);
+  it('_0 already exists → saves as _1', async () => {
+    const dirHandle = makeMockDirHandle('scans', [], [{ name: 'scan001_0.png' }]);
     await saveToOut(dirHandle, 'scan001.png', mockCanvas);
     expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_1.png', { create: true });
-    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_2.png', { create: true });
   });
 
-  it('collision: _0…_3 present → renames to _4, writes _5', async () => {
+  it('_0…_3 present → saves as _4', async () => {
     const dirHandle = makeMockDirHandle('scans', [], [
-      { name: 'scan001.png' },
       { name: 'scan001_0.png' },
       { name: 'scan001_1.png' },
       { name: 'scan001_2.png' },
@@ -209,34 +199,12 @@ describe('saveToOut()', () => {
     ]);
     await saveToOut(dirHandle, 'scan001.png', mockCanvas);
     expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_4.png', { create: true });
-    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_5.png', { create: true });
   });
 
-  it('collision: only suffixed files exist (no bare file) → writes next suffix', async () => {
-    const dirHandle = makeMockDirHandle('scans', [], [
-      { name: 'scan001_0.png' },
-      { name: 'scan001_1.png' },
-    ]);
-    await saveToOut(dirHandle, 'scan001.png', mockCanvas);
-    expect(dirHandle._outDirHandle.removeEntry).not.toHaveBeenCalled();
-    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_2.png', { create: true });
-  });
-
-  it('collision: removeEntry called with original filename', async () => {
-    const dirHandle = makeMockDirHandle('scans', [], [{ name: 'scan001.png' }]);
-    await saveToOut(dirHandle, 'scan001.png', mockCanvas);
-    expect(dirHandle._outDirHandle.removeEntry).toHaveBeenCalledWith('scan001.png');
-  });
-
-  it('collision: new file written under incremented filename', async () => {
-    const dirHandle = makeMockDirHandle('scans', [], [{ name: 'scan001.png' }]);
-    await saveToOut(dirHandle, 'scan001.png', mockCanvas);
-    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_1.png', { create: true });
-  });
-
-  it('no collision: unrelated files in out/ — no rename', async () => {
+  it('unrelated files in out/ → saves as _0', async () => {
     const dirHandle = makeMockDirHandle('scans', [], [{ name: 'other.png' }]);
     await saveToOut(dirHandle, 'scan001.png', mockCanvas);
+    expect(dirHandle._outDirHandle.getFileHandle).toHaveBeenCalledWith('scan001_0.png', { create: true });
     expect(dirHandle._outDirHandle.removeEntry).not.toHaveBeenCalled();
   });
 

@@ -20,7 +20,7 @@ describe('open → load → save pipeline', () => {
     const canvas = { toBlob: vi.fn((cb) => cb(new Blob(['data'], { type: 'image/png' }))) };
     await saveToOut(dh, deriveOutputFilename('doc.jpg'), canvas);
 
-    expect(dh._outDirHandle.getFileHandle).toHaveBeenCalledWith('doc.png', { create: true });
+    expect(dh._outDirHandle.getFileHandle).toHaveBeenCalledWith('doc_0.png', { create: true });
     expect(dh._outWritable.write).toHaveBeenCalled();
     expect(dh._outWritable.close).toHaveBeenCalled();
   });
@@ -45,10 +45,10 @@ describe('open → load → save pipeline', () => {
     expect(dirHandle.getDirectoryHandle).toHaveBeenCalledWith('out', { create: true });
   });
 
-  it('collision pipeline: existing file renamed, new file written as original name', async () => {
+  it('collision pipeline: _0 exists → saves as _1', async () => {
     const dirHandle = makeMockDirHandle(
       'scans', [makeMockFileHandle('doc.jpg')],
-      [{ name: 'doc.png', content: 'old-data' }]
+      [{ name: 'doc_0.png', content: 'old-data' }]
     );
     window.showDirectoryPicker.mockResolvedValue(dirHandle);
     const { dirHandle: dh } = await openFolder();
@@ -56,8 +56,7 @@ describe('open → load → save pipeline', () => {
     await saveToOut(dh, 'doc.png', canvas);
 
     const od = dh._outDirHandle;
-    expect(od.removeEntry).toHaveBeenCalledWith('doc.png');
-    expect(od.getFileHandle).toHaveBeenCalledWith('doc_0.png', { create: true });
+    expect(od.removeEntry).not.toHaveBeenCalled();
     expect(od.getFileHandle).toHaveBeenCalledWith('doc_1.png', { create: true });
   });
 });
