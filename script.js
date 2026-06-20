@@ -911,7 +911,10 @@ function applySimplePerspective(orderedPoints) {
             sourceCtx.putImageData(imageData, 0, 0);
             sourceCtx.drawImage(result.canvas, minX, minY, destWidth, destHeight);
 
-            pointsCanvas.style.pointerEvents = 'none';
+            // Keep pointsCanvas interactive so points stay movable and the
+            // native crosshair cursor stays visible (disabling pointer-events
+            // here hid the cursor — only the ::before circle showed — and
+            // blocked editing until a mode button was clicked).
             downloadBtn.disabled = false;
 
             statusMessage.textContent = `Perspective correction applied (WebGL)! Corrected area: ${destWidth}×${destHeight} pixels.`;

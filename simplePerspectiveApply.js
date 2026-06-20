@@ -88,7 +88,8 @@ export function applySimplePerspective(orderedPoints, { sourceCtx, pointsCanvas,
     sourceCtx.putImageData(imageData, 0, 0);
     sourceCtx.drawImage(tempCanvas, minX, minY, destWidth, destHeight);
 
-    pointsCanvas.style.pointerEvents = 'none';
+    // Keep pointsCanvas interactive (see webglPerspective path): disabling
+    // pointer-events hid the crosshair cursor and blocked editing after apply.
     downloadBtn.disabled = false;
 
     statusMessage.textContent = `Perspective correction applied! Corrected area: ${destWidth}×${destHeight} pixels.`;
