@@ -4,24 +4,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Browser-based document perspective correction tool. Users upload an image, select 4+ corner points on a document, and the tool applies a perspective transform to produce a rectified (front-facing) view. All processing is client-side — no server uploads.
+See `README.md` for what the tool does and how to use it. In short: a client-side (no server uploads) browser tool that perspective-corrects a document from 4+ user-selected corner points. Plain HTML/CSS/JS with ES modules — no bundler, no build step.
 
 Hosted at: `https://ni-kit-mht.github.io/perspective-correction/`
 
 ## Running Locally
 
 ```bash
-node server.cjs          # serves on http://localhost:3000 (or PORT env var)
+node server.cjs          # or: npm run serve — serves on http://localhost:3000 (PORT env var to override)
 ```
 
-Plain HTML/CSS/JS with ES modules. No bundler.
+`server.js` is an ESM wrapper that just requires `server.cjs` (lets `node server.js` work under `"type": "module"`).
 
 ## Testing
 
 ```bash
-npm test                 # unit + integration tests (vitest)
-npx playwright test      # e2e tests (Chromium)
+npm test                          # all unit + integration tests (vitest, jsdom)
+npm run test:watch                # vitest watch mode
+npx vitest run tests/unit/drawPoints.test.js   # a single test file
+npx playwright test               # all e2e tests (Chromium)
+npx playwright test tests/e2e/cornerZoom.spec.js   # a single e2e spec
+npm run test:all                  # vitest + playwright
 ```
+
+Tests live in `tests/{unit,integration,e2e}`; `tests/helpers/mockFileSystem.js` mocks the File System Access API. `tests/e2e/performanceBenchmark.spec.js` uses fixtures under `tests/fixtures/perf-images/` (gitignored).
 
 ## Workflow
 
@@ -51,7 +57,8 @@ Key coordinate concept: `sourceCanvas` and `gridCanvas` render at **original ima
 - **`folderBrowser.js`** — folder browser panel: open a local folder via File System Access API, browse images, save corrected output to `out/` subfolder (always numbered: `_0`, `_1`, `_2`, …). Chrome-only.
 - **`helpers.js`** — `orderPoints()`, `getCanvasCoordinates()`, `normalizePoints()`/`denormalizePoints()` for persisting points across images of different sizes.
 - **`perspectiveTransform.js`** — `PerspectiveTransform` class: computes an 8-parameter homography matrix from 4 src/dst point pairs via Gaussian elimination. Used by the simple (4-point) path.
-- **`simplePerspectiveApply.js`** — 4-point correction using `PerspectiveTransform`. Inverse-maps each destination pixel to the source using the homography.
+- **`webglPerspective.js`** — `isWebGLSupported()` / `applyWebGLPerspective()`: GPU-accelerated 4-point warp via a fragment shader. The default fast path for 4 points; falls back to `simplePerspectiveApply.js` if WebGL is unavailable or throws.
+- **`simplePerspectiveApply.js`** — CPU fallback for the 4-point path using `PerspectiveTransform`. Inverse-maps each destination pixel to the source using the homography.
 - **`complexPerspectiveApply.js`** — 5+ point correction. Identifies the 4 best corners (largest quadrilateral area), snaps extra points to edges as constraints, then applies a DLT homography with inverse-distance-weighted local corrections. Includes bilinear interpolation and mild unsharp-mask sharpening.
 - **`mvc.js`** — Mean Value Coordinates interpolation (`mapPointUsingMVC`). Used by download path for full-resolution re-mapping with arbitrary polygon boundaries.
 - **`imageInterpolation.js`** — `getBilinearPixel()` utility for sub-pixel sampling.
@@ -64,9 +71,9 @@ Key coordinate concept: `sourceCanvas` and `gridCanvas` render at **original ima
 ### Correction Pipeline
 
 1. User selects points → `orderPoints()` sorts them by angle
-2. If exactly 4 points → `applySimplePerspective()` using `PerspectiveTransform`
+2. If exactly 4 points → `applyWebGLPerspective()` (GPU); on failure or unsupported WebGL, falls back to `applySimplePerspective()` using `PerspectiveTransform`
 3. If 5+ points → `applyComplexPerspective()` which finds best 4 corners, creates edge constraints for remaining points, computes DLT homography, and applies constrained inverse warp
-4. Result is drawn back onto `sourceCanvas`; download/print buttons become enabled
+4. The corrected crop is overlaid onto the full original image on `sourceCanvas` (only the cropped region is saved); download/print buttons become enabled
 
 ### Folder Browser Flow
 
