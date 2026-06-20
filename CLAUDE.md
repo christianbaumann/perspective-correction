@@ -51,6 +51,8 @@ The app uses a **four-layer canvas** stack inside `.canvas-wrapper`:
 
 Key coordinate concept: `sourceCanvas` and `gridCanvas` render at **original image resolution** but are CSS-scaled to fit the container. `pointsCanvas` renders at **display resolution** (saving ~46MB per image). Points are stored in image coordinates; `drawPoints()` converts to display coords via `1/displayScale`. `displayScale = imageWidth / displayWidth` converts between mouse coordinates and canvas coordinates.
 
+**Gotcha — `pointsCanvas` pointer-events:** applying a correction (all three paths: WebGL, simple, complex) sets `pointsCanvas.style.pointerEvents = 'none'` so the corrected result is non-interactive. `setMode()` restores it to `'all'` (every mode is interactive), and the image-load path also resets it. If you add a new code path that disables pointer-events, make sure an interaction entry point re-enables it — otherwise editing silently breaks until the image reloads.
+
 ### Module Responsibilities
 
 - **`script.js`** — main entry point. Handles image upload, point interaction (add/move/delete modes), canvas setup, zoom preview, and orchestrates correction. Points render as crosshairs with a colored center dot (blue default, red when dragging). Keyboard: Enter → apply correction; ArrowRight/ArrowLeft → navigate folder images (with wrap); Space → reset all points. Imports all other modules.
