@@ -156,12 +156,24 @@ function init() {
         hideZoomPreview();
     });
 
-    // Corner zoom drag events
+    // Corner zoom drag events + top-middle zoom preview while hovering a corner box
     for (const [key, canvas] of Object.entries(cornerZoomCanvases)) {
         canvas.addEventListener('mousedown', (e) => handleCornerZoomMouseDown(e, key));
-        canvas.addEventListener('mousemove', (e) => handleCornerZoomMouseMove(e));
+        canvas.addEventListener('mousemove', (e) => {
+            handleCornerZoomMouseMove(e);
+            // Show the top-middle zoom preview centered on this corner's point
+            const entry = cornerDragState
+                ? { point: cornerDragState.pointRef }
+                : currentCornerAssignment[key];
+            if (entry && entry.point) {
+                updateZoomPreview(entry.point.x, entry.point.y);
+            }
+        });
         canvas.addEventListener('mouseup', handleCornerZoomMouseUp);
-        canvas.addEventListener('mouseleave', handleCornerZoomMouseUp);
+        canvas.addEventListener('mouseleave', () => {
+            handleCornerZoomMouseUp();
+            hideZoomPreview();
+        });
     }
 
     // Keyboard shortcuts
