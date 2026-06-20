@@ -1,6 +1,7 @@
 # Perspective Correction
 
-Browser-based document perspective correction tool. Upload an image, select 4+ corner points on a document, and get a rectified front-facing view. All processing is client-side — no server uploads.
+Browser-based document perspective correction tool. Upload an image, select 4+ corner points on a document, and get a
+rectified front-facing view. All processing is client-side — no server uploads.
 
 Live: https://ni-kit-mht.github.io/perspective-correction/
 
@@ -19,26 +20,31 @@ Plain HTML/CSS/JS with ES modules — no build step.
 3. Apply the correction (button or **Enter**)
 4. Download, print, or save to the folder's `out/` subfolder
 
-A live **3× zoom preview** follows the cursor for precise point placement, and an optional **grid overlay** (auto white/black for contrast) helps with alignment.
+A live **3× zoom preview** follows the cursor for precise point placement, and an optional **grid overlay** (auto
+white/black for contrast) helps with alignment.
 
 ### Folder Browser (Chrome only)
 
 Open a local folder to batch-process scans:
 
 - Browse images in the left panel; the active image auto-scrolls into view
+- **Load the next image** with **→** (previous with **←**) or by clicking a thumbnail — the next image is prefetched in
+  the background for near-instant loading. Applying a correction keeps you on the current image (no auto-advance), so
+  press **→** when you're ready to move on.
 - Points are **normalized and re-applied** to each image, so a corner layout carries across a batch
-- Applying a correction saves the corrected crop to `out/` with a numbered suffix (`_0`, `_1`, `_2`, …) and keeps you on the current image
+- Applying a correction saves the corrected crop to `out/` with a numbered suffix (`_0`, `_1`, `_2`, …) and keeps you on
+  the current image
 - Your folder, position, and points are **restored on page reload**
 
 Uses the File System Access API (Chrome/Edge).
 
 ### Keyboard shortcuts
 
-| Key | Action |
-| --- | --- |
-| **Enter** | Apply correction (and save, in folder mode) |
-| **→** / **←** | Next / previous folder image (wraps) |
-| **Space** | Reset all points |
+| Key           | Action                                      |
+|---------------|---------------------------------------------|
+| **Enter**     | Apply correction (and save, in folder mode) |
+| **→** / **←** | Next / previous folder image (wraps)        |
+| **Space**     | Reset all points                            |
 
 ## Testing
 
