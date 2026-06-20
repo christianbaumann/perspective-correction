@@ -17,11 +17,11 @@ Plain HTML/CSS/JS with ES modules — no build step.
 
 1. Upload an image (or open a folder to batch-process)
 2. Select 4+ corner points on the document — drag to adjust, click in delete mode to remove
-3. Apply the correction (button or **Enter**)
+3. Apply the correction (button or **Enter**) — points stay editable afterward, so you can tweak and re-apply
 4. Download, print, or save to the folder's `out/` subfolder
 
-A live **3× zoom preview** follows the cursor for precise point placement, and an optional **grid overlay** (auto
-white/black for contrast) helps with alignment.
+A live **3× zoom preview** follows the cursor for precise point placement (and appears while hovering a corner-zoom
+box), and an optional **grid overlay** (auto white/black for contrast) helps with alignment.
 
 ### Folder Browser (Chrome only)
 
