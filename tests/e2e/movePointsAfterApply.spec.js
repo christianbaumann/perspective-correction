@@ -27,6 +27,39 @@ function pointerEvents(page) {
   return page.locator('#pointsCanvas').evaluate((el) => getComputedStyle(el).pointerEvents);
 }
 
+// Regression: immediately after applying (no mode-button click) the points
+// canvas had pointer-events:none, which hid the native crosshair cursor (only
+// the custom ::before circle showed) and blocked dragging. Surfaced after a
+// window blur/refocus, but the real cause is the post-apply state itself.
+test('points canvas stays interactive immediately after applying, no mode switch (button)', async ({ page }) => {
+  await addFourPoints(page);
+
+  await page.click('#transformBtn');
+  await expect(page.locator('#statusMessage')).toContainText('Perspective correction applied', { timeout: 5000 });
+
+  // No mode-button click here — this is the exact state the user was left in.
+  expect(await pointerEvents(page)).not.toBe('none');
+
+  // Native crosshair must remain visible (cursor must not fall through to the
+  // wrapper's `cursor: none`, which leaves only the circle overlay).
+  const effectiveCursor = await page.locator('#pointsCanvas').evaluate((el) => {
+    const wrapper = el.closest('.canvas-wrapper');
+    return getComputedStyle(el).pointerEvents === 'none'
+      ? getComputedStyle(wrapper).cursor
+      : getComputedStyle(el).cursor;
+  });
+  expect(effectiveCursor).toBe('crosshair');
+});
+
+test('points canvas stays interactive immediately after applying, no mode switch (Enter)', async ({ page }) => {
+  await addFourPoints(page);
+
+  await page.locator('#pointsCanvas').press('Enter');
+  await expect(page.locator('#statusMessage')).toContainText('Perspective correction applied', { timeout: 5000 });
+
+  expect(await pointerEvents(page)).not.toBe('none');
+});
+
 test('points canvas stays interactive when switching to Move Points after applying (button)', async ({ page }) => {
   await addFourPoints(page);
 

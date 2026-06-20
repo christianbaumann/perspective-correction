@@ -108,7 +108,8 @@ const { width, height } = rect;
     sourceCtx.putImageData(srcImg, 0, 0);
     sourceCtx.drawImage(canvas, minX, minY);
 
-    pointsCanvas.style.pointerEvents = 'none';
+    // Keep pointsCanvas interactive (see webglPerspective path): disabling
+    // pointer-events hid the crosshair cursor and blocked editing after apply.
     downloadBtn.disabled = false;
 
     const pointInfo = edgeConstraints ? ` with ${edgeConstraints.length} edge constraints` : '';
