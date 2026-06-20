@@ -386,6 +386,10 @@ function setMode(newMode) {
     
     statusMessage.className = "status";
 
+    // All modes are interactive: re-enable point editing even after a
+    // correction was applied (which sets pointsCanvas pointer-events to none).
+    pointsCanvas.style.pointerEvents = 'all';
+
     // Corner zoom boxes are always interactive for dragging points
     for (const canvas of Object.values(cornerZoomCanvases)) {
         canvas.style.pointerEvents = 'auto';
